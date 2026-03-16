@@ -2,7 +2,6 @@
 
 **SickleSight** is an AI-based toolkit for quantitative analysis of sickle cell disease dynamics from video microscopy data. It combines deep learning segmentation, Vision Transformer (ViT) classification, Siamese network state detection, and optical flow tracking to characterize individual red blood cells across time — producing publication-quality statistics, visualizations, and annotated videos.
 
-> **Name note:** This project was formerly called *CellBox*. We recommend the new name **SickleSight** (alternatives: *SickleScope*, *SickleQuant*, *DrepaVision*) since *CellBox* is already taken.
 
 ---
 
@@ -24,11 +23,11 @@
 
 ```
 SickleSight/
-├── cellbox_gui.py        # GUI application — launch this to open the graphical interface
-├── cellbox_part1.py      # Pipeline 1: temporal state-ratio analysis
-├── cellbox_part2.py      # Pipeline 2: multi-frame morphology analysis (AR / ECC / circularity)
-├── cellbox_merged.py     # Pipeline 3: combined — state-ratio + morphology in one pass
-├── cellbox_env.yaml      # Conda environment specification
+├── sicklesight_gui.py        # GUI application — launch this to open the graphical interface
+├── sicklesight_part1.py      # Pipeline 1: temporal state-ratio analysis
+├── sicklesight_part2.py      # Pipeline 2: multi-frame morphology analysis (AR / ECC / circularity)
+├── sicklesight_merged.py     # Pipeline 3: combined — state-ratio + morphology in one pass
+├── sicklesight_env.yaml      # Conda environment specification
 └── README.md
 ```
 
@@ -39,22 +38,22 @@ SickleSight/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/liaoherui/CellBox.git
-cd CellBox
+git clone https://github.com/liaoherui/sicklesight.git
+cd sicklesight
 ```
 
 ### 2. Create the Conda environment
 
 ```bash
-conda env create -f cellbox_env.yaml
-conda activate cellbox
+conda env create -f sicklesight_env.yaml
+conda activate sicklesight
 ```
 
 ### 3. Download pre-trained models
 
-Download **CellBox-Models.zip** from the link below and unzip its contents into the **same directory as the scripts**:
+Download **sicklesight-Models.zip** from the link below and unzip its contents into the **same directory as the scripts**:
 
-> **[Download CellBox-Models.zip](https://www.dropbox.com/scl/fi/f4roqang8cwm6cazw9qiw/CellBox-Models.zip?rlkey=aj4wk4xekau0y4dj56850b18l&st=ccsuhdnh&dl=0)**
+> **[Download sicklesight-Models.zip](https://www.dropbox.com/scl/fi/f4roqang8cwm6cazw9qiw/sicklesight-Models.zip?rlkey=aj4wk4xekau0y4dj56850b18l&st=ccsuhdnh&dl=0)**
 
 After extraction, your directory should contain `.pth` / `.pt` model files alongside the Python scripts.
 
@@ -67,8 +66,8 @@ After extraction, your directory should contain `.pth` / `.pt` model files along
 Launch the GUI with:
 
 ```bash
-conda activate cellbox
-python cellbox_gui.py
+conda activate sicklesight
+python sicklesight_gui.py
 ```
 
 **Workflow inside the GUI:**
@@ -76,9 +75,9 @@ python cellbox_gui.py
 1. Click **Add Parent Folder** — the GUI recursively scans for `.mp4` video files and displays them in a file tree.
 2. Select specific videos or entire folders from the tree.
 3. Choose a **Pipeline script** from the dropdown:
-   - `cellbox_part1` — temporal state-ratio analysis
-   - `cellbox_part2` — multi-frame morphology analysis
-   - `cellbox_merged` — both analyses combined
+   - `sicklesight_part1` — temporal state-ratio analysis
+   - `sicklesight_part2` — multi-frame morphology analysis
+   - `sicklesight_merged` — both analyses combined
 4. Set the **Pipeline Folder** (directory containing the scripts and model files).
 5. Set the **Output Directory** where results will be saved.
 6. Click **Generate Script & Run Analysis** — the GUI generates a platform-specific shell script and executes it, streaming live output to the built-in terminal pane.
@@ -91,12 +90,12 @@ All three analysis scripts accept the same core arguments and can be used indepe
 
 ---
 
-#### Pipeline 1: Temporal State-Ratio Analysis (`cellbox_part1.py`)
+#### Pipeline 1: Temporal State-Ratio Analysis (`sicklesight_part1.py`)
 
 Tracks the sickled/non-sickled state of each cell across all frames and produces state-ratio time curves and an annotated output video.
 
 ```bash
-python cellbox_part1.py \
+python sicklesight_part1.py \
     -i video1.mp4,video2.mp4 \
     -o /path/to/output \
     [--frame_skip 2] \
@@ -126,12 +125,12 @@ python cellbox_part1.py \
 
 ---
 
-#### Pipeline 2: Multi-Frame Morphology Analysis (`cellbox_part2.py`)
+#### Pipeline 2: Multi-Frame Morphology Analysis (`sicklesight_part2.py`)
 
 Measures aspect ratio, eccentricity, and circularity at specified frames and generates violin plots comparing sickled vs. non-sickled populations.
 
 ```bash
-python cellbox_part2.py \
+python sicklesight_part2.py \
     -i video1.mp4,video2.mp4 \
     -o /path/to/output \
     [--target_frames 0,480]
@@ -161,12 +160,12 @@ python cellbox_part2.py \
 
 ---
 
-#### Pipeline 3: Combined Analysis (`cellbox_merged.py`)
+#### Pipeline 3: Combined Analysis (`sicklesight_merged.py`)
 
 Runs both Pipeline 1 and Pipeline 2 in a single pass — more efficient than running them sequentially.
 
 ```bash
-python cellbox_merged.py \
+python sicklesight_merged.py \
     -i video1.mp4,video2.mp4 \
     -o /path/to/output \
     [--frame_skip 2] \
