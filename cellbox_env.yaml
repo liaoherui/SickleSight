@@ -1,4 +1,4 @@
-name: cellbox
+name: sicklesight
 channels:
   - defaults
   - conda-forge
