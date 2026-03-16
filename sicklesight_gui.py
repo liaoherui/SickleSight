@@ -216,7 +216,7 @@ class SickleAnalysisGUI:
             detected_scripts = []
             try:
                 for file_name in os.listdir(path):
-                    if file_name.startswith("cellbox_") and file_name.endswith(".py"):
+                    if file_name.startswith("sicklesight_") and file_name.endswith(".py"):
                         if re.search('gui',file_name):continue
                         detected_scripts.append(file_name)
             except Exception as e:
