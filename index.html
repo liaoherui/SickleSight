@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Image Labeler</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+        }
+        /* For Webkit-based browsers (Chrome, Safari, etc.) */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937; /* bg-gray-800 */
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563; /* bg-gray-600 */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280; /* bg-gray-500 */
+        }
+        .thumbnail-item {
+            border: 2px solid transparent;
+            transition: all 0.2s ease-in-out;
+        }
+        .thumbnail-item.selected {
+            border-color: #34d399; /* emerald-400 */
+            box-shadow: 0 0 10px #34d399, 0 0 5px rgba(52, 211, 153, 0.5) inset;
+        }
+        .thumbnail-item[data-status="processed"] {
+            opacity: 0.3;
+            border-color: #4b5563; /* gray-600 */
+            box-shadow: none;
+        }
+        .thumbnail-item[data-status="processed"].selected {
+            opacity: 0.6; /* Make it slightly more visible if selected while processed */
+        }
+        .thumbnail-item[data-status="processed"]::after {
+            content: '✔';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2rem;
+            color: #10b981; /* emerald-500 */
+            text-shadow: 0 0 5px rgba(0,0,0,0.7);
+        }
+        .history-log-item {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-bottom: 4px;
+            background-color: #374151; /* bg-gray-700 */
+        }
+        .resizer {
+            background-color: #374151; /* bg-gray-700 */
+            width: 5px;
+            cursor: col-resize;
+            flex-shrink: 0;
+        }
+        .resizer:hover {
+            background-color: #4b5563; /* bg-gray-600 */
+        }
+        #toast {
+            pointer-events: none;
+            transition: opacity 0.3s ease-in-out;
+        }
+        #toast:hover {
+            opacity: 0.5;
+        }
+        .center-image-container {
+            position: relative;
+            background-color: #1f2937; /* bg-gray-800 */
+            background-image: linear-gradient(45deg, #374151 25%, transparent 25%, transparent 75%, #374151 75%, #374151), linear-gradient(45deg, #374151 25%, transparent 25%, transparent 75%, #374151 75%, #374151);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            border-radius: 0.5rem;
+        }
+        .center-image-container.removing {
+            transform: scale(0.5);
+            opacity: 0;
+        }
+        .deselect-btn {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 24px;
+            height: 24px;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+        .center-image-container:hover .deselect-btn {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 flex flex-col h-screen overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700 p-4 shadow-md z-10">
+        <h1 class="text-2xl font-bold text-white">Interactive Image Labeler</h1>
+        <p class="text-sm text-gray-400">Ctrl+Click, Shift+Click, and classify multiple images at once. All processing is done locally.</p>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow flex flex-col md:flex-row overflow-hidden">
+
+        <!-- Left Panel: Thumbnails -->
+        <aside id="thumbnails-panel" class="w-full md:w-64 lg:w-72 bg-gray-800 p-4 overflow-y-auto border-r border-gray-700 flex-shrink-0" style="flex-basis: 35%;">
+            <h2 class="text-lg font-semibold mb-3 text-white">Images</h2>
+            <div id="thumbnail-container" class="grid grid-cols-6 gap-1">
+                <p class="col-span-6 text-gray-500 text-sm">Select an image folder to begin.</p>
+            </div>
+        </aside>
+
+        <div class="resizer" id="resizer-left"></div>
+
+        <!-- Center Panel: Image Viewer -->
+        <div id="viewer-panel" class="flex-grow bg-gray-900 p-4">
+            <div id="image-placeholder" class="text-gray-600 text-center h-full w-full flex flex-col items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-24 w-24" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                <p class="mt-4 text-lg">Select an image to view</p>
+            </div>
+        </div>
+
+        <div class="resizer" id="resizer-right"></div>
+
+        <!-- Right Panel: Controls -->
+        <aside id="right-controls-panel" class="relative w-full md:w-72 lg:w-80 bg-gray-800 p-4 border-l border-gray-700 flex flex-col flex-shrink-0" style="flex-basis: 320px;">
+            <div class="space-y-4 overflow-y-auto">
+                <div>
+                    <h2 class="text-lg font-semibold mb-3 text-white">1. Setup</h2>
+                    <div class="space-y-3">
+                        <button id="select-source-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Select Image Folder</button>
+                        <p id="source-folder-path" class="text-xs text-gray-400 truncate">No folder selected</p>
+                        <button id="select-output-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Select Output Folder</button>
+                        <p id="output-folder-path" class="text-xs text-gray-400 truncate">No folder selected</p>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="checkbox" id="move-files-checkbox" class="h-4 w-4 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-blue-500" checked>
+                            <span class="text-sm text-gray-300">Move files (deletes from source)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-lg font-semibold mb-3 text-white">2. Classify Image(s)</h2>
+                    <p class="text-sm text-gray-400 mb-3">Use keyboard shortcuts or click buttons.</p>
+                    <div id="class-buttons-container" class="grid grid-cols-2 gap-3"></div>
+                </div>
+
+                <div>
+                    <h2 class="text-lg font-semibold mb-3 text-white">3. Class Configuration</h2>
+                    <div id="class-config-container" class="space-y-2"></div>
+                    <button id="add-class-btn" class="mt-3 w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm">Add Class</button>
+                </div>
+
+            </div>
+
+            <div class="flex-grow"></div> <!-- Spacer -->
+
+            <div class="mt-4 pt-4 border-t border-gray-700">
+                <h2 class="text-lg font-semibold mb-2 text-white">Action History</h2>
+                <div id="history-log" class="h-24 overflow-y-auto bg-gray-900 p-2 rounded-md mb-3">
+                    <p class="text-gray-500 text-sm">No actions yet.</p>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <button id="undo-btn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>Undo</button>
+                    <button id="redo-btn" class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>Redo</button>
+                </div>
+            </div>
+
+            <div id="toast" class="fixed bottom-24 right-4 md:bottom-8 md:right-8 p-4 rounded-lg shadow-lg bg-gray-700 text-white opacity-0 duration-300 z-50">
+                <p id="toast-message"></p>
+            </div>
+
+            <!-- Loading Overlay -->
+            <div id="copying-overlay" class="absolute inset-0 bg-gray-800 bg-opacity-75 flex-col items-center justify-center hidden z-20">
+                <svg class="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p id="copying-message" class="mt-4 text-white font-semibold">Processing...</p>
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- Footer: Progress Bar -->
+    <footer class="bg-gray-800 border-t border-gray-700 p-3 z-10">
+        <div class="flex flex-col items-center justify-center space-y-1">
+            <div id="progress-text" class="text-sm text-gray-400">Processed: 0 / 0</div>
+            <div class="w-1/2 bg-gray-700 rounded-full h-2.5">
+                <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+     // --- CONFIGURATION ---
+     const DEFAULT_CLASSES = {
+         "A_Discocyte": { key: "1" },
+         "B_Cup-shape": { key: "2" },
+         "C_Stomatocyte": { key: "3" },
+         "D_Reticulocyte": { key: "4" },
+         "E_Echinocyte": { key: "5" },
+         "F_Granular": { key: "6" },
+	 "G_ISC": { key: "7" },
+	 "skip": { key: "s" }
+     };
+     const CLASS_COLORS = [
+         { color: "bg-indigo-500", hover: "hover:bg-indigo-600" }, { color: "bg-amber-500", hover: "hover:bg-amber-600" },
+         { color: "bg-sky-500", hover: "hover:bg-sky-600" }, { color: "bg-rose-500", hover: "hover:bg-rose-600" },
+         { color: "bg-emerald-500", hover: "hover:bg-emerald-600" }, { color: "bg-fuchsia-500", hover: "hover:bg-fuchsia-600" }
+     ];
+     const SKIP_COLOR = { color: "bg-gray-500", hover: "hover:bg-gray-600" };
+     const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
+
+     // --- DOM ELEMENTS ---
+     const [
+         selectSourceBtn, selectOutputBtn, sourceFolderPath, outputFolderPath, thumbnailContainer, viewerPanel,
+         imagePlaceholder, classButtonsContainer, progressBar, progressText, toast, toastMessage,
+         classConfigContainer, addClassBtn, historyLog, undoBtn, redoBtn, thumbnailsPanel, rightControlsPanel,
+         resizerLeft, resizerRight, copyingOverlay, copyingMessage, moveFilesCheckbox
+     ] = [
+         "select-source-btn", "select-output-btn", "source-folder-path", "output-folder-path", "thumbnail-container", "viewer-panel",
+         "image-placeholder", "class-buttons-container", "progress-bar", "progress-text", "toast", "toast-message",
+         "class-config-container", "add-class-btn", "history-log", "undo-btn", "redo-btn", "thumbnails-panel", "right-controls-panel",
+         "resizer-left", "resizer-right", "copying-overlay", "copying-message", "move-files-checkbox"
+     ].map(id => document.getElementById(id));
+
+     // --- STATE ---
+     let sourceFolderHandle = null, outputFolderHandle = null;
+     let imageFiles = []; // { handle, status }
+     let selectedIndices = new Set();
+     let lastClickedIndex = -1;
+     let toastTimeout;
+     let classConfig = {};
+     let historyStack = [], redoStack = [];
+
+     // --- INITIALIZATION ---
+     document.addEventListener('DOMContentLoaded', () => {
+         loadDefaultClasses();
+         updateAllUI();
+
+         selectSourceBtn.addEventListener('click', selectSourceFolder);
+         selectOutputBtn.addEventListener('click', selectOutputFolder);
+         addClassBtn.addEventListener('click', addNewClass);
+         undoBtn.addEventListener('click', undoLastAction);
+         redoBtn.addEventListener('click', redoLastAction);
+         document.addEventListener('keydown', handleKeyPress);
+
+         setupResizers();
+     });
+
+     // --- CORE LOGIC ---
+     function loadDefaultClasses() {
+         classConfig = JSON.parse(JSON.stringify(DEFAULT_CLASSES)); // Deep copy
+     }
+
+     async function selectSourceFolder() {
+         try {
+             sourceFolderHandle = await window.showDirectoryPicker();
+             sourceFolderPath.textContent = `Source: ${sourceFolderHandle.name}`;
+             sourceFolderPath.title = sourceFolderHandle.name;
+             await loadImages();
+         } catch (err) { if (err.name !== 'AbortError') console.error('Error selecting folder:', err); }
+     }
+
+     async function selectOutputFolder() {
+         try {
+             outputFolderHandle = await window.showDirectoryPicker();
+             outputFolderPath.textContent = `Output: ${outputFolderHandle.name}`;
+             outputFolderPath.title = outputFolderHandle.name;
+         } catch (err) { if (err.name !== 'AbortError') console.error('Error selecting folder:', err); }
+     }
+
+     async function loadImages() {
+         if (!sourceFolderHandle) return;
+         resetState();
+         thumbnailContainer.innerHTML = '<p class="col-span-6 text-gray-400">Loading images...</p>';
+
+         try {
+             for await (const entry of sourceFolderHandle.values()) {
+                 if (entry.kind === 'file' && SUPPORTED_EXTENSIONS.some(ext => entry.name.toLowerCase().endsWith(ext))) {
+                     imageFiles.push({ handle: entry, status: 'pending' });
+                 }
+             }
+         } catch (err) {
+             showToast('Could not read folder. Please grant permissions.', 'error');
+             return;
+         }
+
+         imageFiles.sort((a, b) => a.handle.name.localeCompare(b.handle.name, undefined, { numeric: true }));
+         renderThumbnails();
+         if (imageFiles.length > 0) handleImageClick(0, {}); else updateProgress();
+     }
+
+     function handleImageClick(index, event) {
+         const { ctrlKey, metaKey, shiftKey } = event;
+
+         if (selectedIndices.has(index) && !ctrlKey && !metaKey && !shiftKey) {
+             return;
+         }
+
+         if (shiftKey && lastClickedIndex !== -1) {
+             const start = Math.min(index, lastClickedIndex);
+             const end = Math.max(index, lastClickedIndex);
+             for (let i = start; i <= end; i++) {
+                 if (imageFiles[i].status !== 'processed') {
+                     selectedIndices.add(i);
+                 }
+             }
+         } else if (ctrlKey || metaKey) {
+             if (selectedIndices.has(index)) {
+                 selectedIndices.delete(index);
+             } else {
+                 selectedIndices.add(index);
+             }
+             lastClickedIndex = index;
+         } else {
+             selectedIndices.clear();
+             selectedIndices.add(index);
+             lastClickedIndex = index;
+         }
+
+         updateSelectionUI();
+     }
+
+     function deselectImage(index) {
+         selectedIndices.delete(index);
+
+         const centerContainer = viewerPanel.querySelector(`.center-image-container[data-index='${index}']`);
+         if (centerContainer) {
+             centerContainer.classList.add('removing');
+         }
+         updateThumbnailHighlights();
+
+         setTimeout(() => {
+             renderCenterViewer();
+         }, 300);
+     }
+
+     async function performClassification(imageIndices, className, options = {}) {
+         const { isMoveOverride = null } = options;
+         const isMove = isMoveOverride !== null ? isMoveOverride : moveFilesCheckbox.checked;
+
+         if (className !== 'skip') {
+             if (!outputFolderHandle) {
+                 showToast('Please select an output folder first.', 'warning');
+                 return { success: false };
+             }
+             try {
+                 const targetDir = await outputFolderHandle.getDirectoryHandle(className, { create: true });
+                 for (const index of imageIndices) {
+                     const fileInfo = imageFiles[index];
+                     const file = await fileInfo.handle.getFile();
+                     const newFile = await targetDir.getFileHandle(fileInfo.handle.name, { create: true });
+                     const writable = await newFile.createWritable();
+                     await writable.write(file);
+                     await writable.close();
+
+                     if (isMove) {
+                         await sourceFolderHandle.removeEntry(fileInfo.handle.name);
+                     }
+                     fileInfo.status = 'processed';
+                 }
+             } catch (err) {
+                 showToast(`Failed to ${isMove ? 'move' : 'copy'} to '${className}'.`, 'error');
+                 console.error(err);
+                 return { success: false };
+             }
+         } else {
+             imageIndices.forEach(index => imageFiles[index].status = 'processed');
+         }
+         return { success: true };
+     }
+
+     async function classifySelectedImages(className) {
+         const indicesToProcess = Array.from(selectedIndices).filter(i => imageFiles[i].status === 'pending');
+         if (indicesToProcess.length === 0) {
+             showToast('All selected images are already processed.', 'warning');
+             return;
+         }
+
+         const isMove = moveFilesCheckbox.checked;
+         const count = indicesToProcess.length;
+         const actionVerb = isMove ? 'Moving' : 'Copying';
+         showLoader(className === 'skip' ? `Skipping ${count} image(s)...` : `${actionVerb} ${count} image(s)...`);
+         try {
+             const { success } = await performClassification(indicesToProcess, className);
+             if (success) {
+                 const action = {
+                     type: 'classify',
+                     isMove,
+                     items: indicesToProcess.map(i => ({ imageIndex: i, className }))
+                 };
+                 historyStack.push(action);
+                 redoStack = [];
+
+                 const messageVerb = isMove ? 'Moved' : 'Copied';
+                 const message = className === 'skip' ? `Skipped ${count} image(s)` : `${messageVerb} ${count} image(s) to '${className}'`;
+                 showToast(message);
+
+                 updateThumbnailsState();
+                 updateProgress();
+                 updateHistoryUI();
+                 selectNextPendingImage();
+             }
+         } finally {
+             hideLoader();
+         }
+     }
+
+     async function undoLastAction() {
+         if (historyStack.length === 0) return;
+         const lastAction = historyStack.pop();
+
+         showLoader(`Undoing action...`);
+         try {
+             redoStack.push(lastAction);
+
+             for (const item of lastAction.items) {
+                 const { imageIndex, className } = item;
+                 const fileInfo = imageFiles[imageIndex];
+
+                 if (className !== 'skip') {
+                     const destDir = await outputFolderHandle.getDirectoryHandle(className);
+                     const destFileHandle = await destDir.getFileHandle(fileInfo.handle.name);
+
+                     if (lastAction.isMove) {
+                         // Move it back to source
+                         const file = await destFileHandle.getFile();
+                         const sourceFileHandle = await sourceFolderHandle.getFileHandle(fileInfo.handle.name, { create: true });
+                         const writable = await sourceFileHandle.createWritable();
+                         await writable.write(file);
+                         await writable.close();
+                     }
+
+                     await destDir.removeEntry(fileInfo.handle.name);
+                 }
+
+                 fileInfo.status = 'pending';
+             }
+
+             showToast(`Undo: ${lastAction.items.length} image(s) from '${lastAction.items[0].className}'`);
+             updateThumbnailsState();
+             updateProgress();
+             updateHistoryUI();
+
+             selectedIndices = new Set(lastAction.items.map(i => i.imageIndex));
+             updateSelectionUI();
+         } catch(err) {
+             showToast('Undo failed.', 'error');
+             console.error(err);
+         } finally {
+             hideLoader();
+         }
+     }
+
+     async function redoLastAction() {
+         if (redoStack.length === 0) return;
+         const actionToRedo = redoStack.pop();
+
+         showLoader('Redoing action...');
+         try {
+             const indicesToProcess = actionToRedo.items.map(i => i.imageIndex);
+             const className = actionToRedo.items[0].className;
+
+             const { success } = await performClassification(indicesToProcess, className, { isMoveOverride: actionToRedo.isMove });
+
+             if(success) {
+                 historyStack.push(actionToRedo);
+                 showToast(`Redo: ${indicesToProcess.length} image(s) to '${className}'`);
+                 updateThumbnailsState();
+                 updateProgress();
+                 updateHistoryUI();
+                 selectNextPendingImage();
+             }
+         } finally {
+             hideLoader();
+         }
+     }
+
+     function handleKeyPress(e) {
+         if (document.activeElement.tagName === 'INPUT' || !copyingOverlay.classList.contains('hidden')) return;
+
+         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoLastAction(); return; }
+         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redoLastAction(); return; }
+
+         for (const className in classConfig) {
+             if (classConfig[className].key === e.key.toLowerCase()) {
+                 e.preventDefault();
+                 classifySelectedImages(className);
+                 return;
+             }
+         }
+
+         if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+             e.preventDefault();
+             let current = lastClickedIndex > -1 ? lastClickedIndex : 0;
+             if (imageFiles.length === 0) return;
+             const nextIndex = (current + (e.key === 'ArrowRight' ? 1 : -1) + imageFiles.length) % imageFiles.length;
+             handleImageClick(nextIndex, {});
+             const thumb = document.querySelector(`[data-index='${nextIndex}']`);
+             thumb?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+         }
+     }
+
+     function updateAllUI() {
+         renderConfigUI();
+         renderClassButtons();
+         updateThumbnailsState();
+         updateHistoryUI();
+         updateProgress();
+     }
+
+     function updateSelectionUI() {
+         renderCenterViewer();
+         updateThumbnailHighlights();
+     }
+
+     function getSortedClassNames() {
+         return Object.keys(classConfig).sort((a, b) => {
+             if (a === 'skip') return 1;
+             if (b === 'skip') return -1;
+             return a.localeCompare(b);
+         });
+     }
+
+     function renderConfigUI() {
+         classConfigContainer.innerHTML = '';
+         getSortedClassNames().forEach(className => {
+             const config = classConfig[className];
+             const isSkip = className === 'skip';
+
+             const wrapper = document.createElement('div');
+             wrapper.className = 'flex items-center space-x-2';
+
+             const nameInput = document.createElement('input');
+             nameInput.type = 'text';
+             nameInput.value = className;
+             nameInput.disabled = isSkip;
+             nameInput.className = `flex-1 min-w-0 bg-gray-700 p-1 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500 focus:outline-none ${isSkip ? 'opacity-50' : ''}`;
+             nameInput.onchange = (e) => updateClassName(className, e.target.value);
+
+             const keyInput = document.createElement('input');
+             keyInput.type = 'text';
+             keyInput.value = config.key;
+             keyInput.maxLength = 1;
+             keyInput.className = 'w-10 text-center bg-gray-700 p-1 rounded border border-gray-600 focus:ring-2 focus:ring-blue-500 focus:outline-none';
+             keyInput.onchange = (e) => { config.key = e.target.value.toLowerCase(); updateAllUI(); };
+
+             const removeBtn = document.createElement('button');
+             removeBtn.textContent = 'X';
+             removeBtn.disabled = isSkip;
+             removeBtn.className = `px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white font-bold ${isSkip ? 'opacity-50 cursor-not-allowed' : ''}`;
+             removeBtn.onclick = () => { delete classConfig[className]; updateAllUI(); };
+
+             wrapper.append(nameInput, keyInput, removeBtn);
+             classConfigContainer.appendChild(wrapper);
+         });
+     }
+
+     function renderClassButtons() {
+         classButtonsContainer.innerHTML = '';
+         let colorIndex = 0;
+         getSortedClassNames().forEach(className => {
+             const config = classConfig[className];
+             const colors = (className === 'skip') ? SKIP_COLOR : (CLASS_COLORS[colorIndex % CLASS_COLORS.length]);
+             const button = document.createElement('button');
+             button.className = `w-full ${colors.color} ${colors.hover} text-white font-bold py-2 px-4 rounded-lg transition-colors text-sm`;
+             button.textContent = `${className.charAt(0).toUpperCase() + className.slice(1)} (${config.key.toUpperCase()})`;
+             button.onclick = () => classifySelectedImages(className);
+             classButtonsContainer.appendChild(button);
+             if (className !== 'skip') colorIndex++;
+         });
+     }
+
+     function renderThumbnails() {
+         thumbnailContainer.innerHTML = '';
+         imageFiles.forEach((fileInfo, index) => {
+             const thumbItem = document.createElement('div');
+             thumbItem.className = 'thumbnail-item relative aspect-square bg-gray-700 rounded-md overflow-hidden cursor-pointer';
+             thumbItem.dataset.index = index;
+             thumbItem.dataset.status = 'pending';
+             thumbItem.onclick = (e) => handleImageClick(index, e);
+             const img = document.createElement('img');
+             img.className = 'w-full h-full object-cover';
+             img.loading = 'lazy';
+             thumbItem.appendChild(img);
+             thumbnailContainer.appendChild(thumbItem);
+             fileInfo.handle.getFile().then(file => { img.src = URL.createObjectURL(file); });
+         });
+         if (imageFiles.length === 0) {
+             thumbnailContainer.innerHTML = '<p class="col-span-6 text-gray-500">No supported images found.</p>';
+         }
+     }
+
+     async function renderCenterViewer() {
+         viewerPanel.innerHTML = '';
+         viewerPanel.className = 'flex-grow bg-gray-900 flex items-center justify-center p-4 overflow-y-auto';
+         viewerPanel.style.gridTemplateColumns = '';
+         viewerPanel.style.gridTemplateRows = '';
+
+         if (selectedIndices.size === 0) {
+             viewerPanel.appendChild(imagePlaceholder);
+             return;
+         }
+
+         const N = selectedIndices.size;
+         const panelRect = viewerPanel.getBoundingClientRect();
+
+         if (panelRect.width === 0 || panelRect.height === 0) return;
+
+         let bestLayout = { cols: 1, rows: N, cellSize: 0 };
+         for (let cols = 1; cols <= N; cols++) {
+             let rows = Math.ceil(N / cols);
+             let potentialCellSize = Math.min((panelRect.width - 16 * cols) / cols, (panelRect.height - 16 * rows) / rows);
+
+             if (potentialCellSize > bestLayout.cellSize) {
+                 bestLayout = { cols, rows, cellSize: potentialCellSize };
+             }
+         }
+
+         viewerPanel.className = 'flex-grow bg-gray-900 grid p-2 gap-2 place-items-center overflow-y-auto';
+         viewerPanel.style.gridTemplateColumns = `repeat(${bestLayout.cols}, 1fr)`;
+         viewerPanel.style.gridTemplateRows = `repeat(${bestLayout.rows}, 1fr)`;
+
+         for (const index of selectedIndices) {
+             const fileInfo = imageFiles[index];
+             const file = await fileInfo.handle.getFile();
+
+             const container = document.createElement('div');
+             container.className = 'center-image-container relative w-full h-full flex items-center justify-center';
+             container.dataset.index = index;
+
+             const img = document.createElement('img');
+             img.src = URL.createObjectURL(file);
+             img.className = 'max-w-full max-h-full object-contain';
+
+             const btn = document.createElement('button');
+             btn.className = 'deselect-btn';
+             btn.innerHTML = '&times;';
+             btn.onclick = (e) => {
+                 e.stopPropagation();
+                 deselectImage(index);
+             };
+
+             container.appendChild(img);
+             container.appendChild(btn);
+             viewerPanel.appendChild(container);
+         }
+     }
+
+     function updateThumbnailHighlights() {
+         document.querySelectorAll('.thumbnail-item').forEach(thumb => {
+             const index = parseInt(thumb.dataset.index);
+             if (selectedIndices.has(index)) {
+                 thumb.classList.add('selected');
+             } else {
+                 thumb.classList.remove('selected');
+             }
+         });
+     }
+
+     function updateThumbnailsState() {
+         imageFiles.forEach((_, index) => {
+             const thumb = document.querySelector(`.thumbnail-item[data-index='${index}']`);
+             if(thumb) thumb.dataset.status = imageFiles[index].status;
+         });
+     }
+
+     function updateHistoryUI() {
+         historyLog.innerHTML = '';
+         if (historyStack.length === 0) {
+             historyLog.innerHTML = '<p class="text-gray-500 text-sm">No actions yet.</p>';
+         } else {
+             [...historyStack].reverse().forEach(action => {
+                 const logItem = document.createElement('p');
+                 logItem.className = 'history-log-item';
+                 const count = action.items.length;
+                 const className = action.items[0].className;
+                 const verb = action.isMove ? 'Moved' : 'Copied';
+                 logItem.textContent = `${verb} ${count} image(s) to '${className}'`;
+                 logItem.title = action.items.map(i => imageFiles[i.imageIndex].handle.name).join(', ');
+                 historyLog.appendChild(logItem);
+             });
+         }
+         undoBtn.disabled = historyStack.length === 0;
+         redoBtn.disabled = redoStack.length === 0;
+     }
+
+     function updateProgress() {
+         const total = imageFiles.length;
+         const processed = imageFiles.filter(f => f.status === 'processed').length;
+         const percentage = total > 0 ? (processed / total) * 100 : 0;
+         progressBar.style.width = `${percentage}%`;
+         progressText.textContent = `Processed: ${processed} / ${total}`;
+
+         if (total > 0 && processed === total) {
+             showToast('All images processed!', 'success');
+             selectedIndices.clear();
+             updateSelectionUI();
+             imagePlaceholder.innerHTML = '<p class="text-2xl text-green-400">🎉 All Done! 🎉</p>';
+         }
+     }
+
+     function selectNextPendingImage() {
+         let start = lastClickedIndex > -1 ? lastClickedIndex : -1;
+         for (let i = 1; i <= imageFiles.length; i++) {
+             const nextIndex = (start + i) % imageFiles.length;
+             if (imageFiles[nextIndex]?.status === 'pending') {
+                 handleImageClick(nextIndex, {});
+                 return;
+             }
+         }
+         selectedIndices.clear();
+         updateSelectionUI();
+     }
+
+     function addNewClass() {
+         const newClassName = `new_class_${Object.keys(classConfig).length}`;
+         if (classConfig[newClassName]) { showToast('Class name already exists.', 'warning'); return; }
+         classConfig[newClassName] = { key: '' };
+         updateAllUI();
+     }
+
+     function updateClassName(oldName, newName) {
+         if (oldName === newName) return;
+         if (classConfig[newName]) {
+             showToast('Class name already exists.', 'warning');
+             updateAllUI();
+             return;
+         }
+         const oldConfig = classConfig[oldName];
+         delete classConfig[oldName];
+         classConfig[newName] = oldConfig;
+         updateAllUI();
+     }
+
+     function setupResizers() {
+         let activeResizer = null;
+         const startResize = (e, resizer) => {
+             activeResizer = resizer;
+             document.body.style.cursor = 'col-resize';
+         };
+         const resize = (e) => {
+             if (!activeResizer) return;
+             const mainRect = document.querySelector('main').getBoundingClientRect();
+             if (activeResizer === resizerLeft) {
+                 const newWidth = e.clientX - mainRect.left;
+                 if (newWidth > 150 && newWidth < mainRect.width * 0.6) {
+                     thumbnailsPanel.style.flexBasis = `${newWidth}px`;
+                 }
+             } else if (activeResizer === resizerRight) {
+                 const newWidth = mainRect.right - e.clientX;
+                 if (newWidth > 200 && newWidth < mainRect.width / 2) {
+                     rightControlsPanel.style.flexBasis = `${newWidth}px`;
+                 }
+             }
+         };
+         const stopResize = () => {
+             activeResizer = null;
+             document.body.style.cursor = '';
+         };
+
+         resizerLeft.addEventListener('mousedown', (e) => startResize(e, resizerLeft));
+         resizerRight.addEventListener('mousedown', (e) => startResize(e, resizerRight));
+         document.addEventListener('mousemove', resize);
+         document.addEventListener('mouseup', stopResize);
+     }
+
+     function showLoader(message) {
+         copyingMessage.textContent = message;
+         copyingOverlay.classList.remove('hidden');
+         copyingOverlay.classList.add('flex');
+         rightControlsPanel.querySelectorAll('button').forEach(btn => btn.disabled = true);
+     }
+
+     function hideLoader() {
+         copyingOverlay.classList.add('hidden');
+         copyingOverlay.classList.remove('flex');
+         rightControlsPanel.querySelectorAll('button').forEach(btn => btn.disabled = false);
+         undoBtn.disabled = historyStack.length === 0;
+         redoBtn.disabled = redoStack.length === 0;
+     }
+
+     function resetState() {
+         imageFiles = [];
+         selectedIndices.clear();
+         lastClickedIndex = -1;
+         historyStack = [];
+         redoStack = [];
+         imagePlaceholder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-24 w-24" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><p class="mt-4 text-lg">Select an image to view</p>`;
+         updateSelectionUI();
+         updateAllUI();
+     }
+
+     function showToast(message, type = 'info') {
+         clearTimeout(toastTimeout);
+         toastMessage.textContent = message;
+         toast.classList.remove('bg-gray-700', 'bg-red-600', 'bg-amber-500', 'bg-green-600');
+         const color = { error: 'bg-red-600', warning: 'bg-amber-500', success: 'bg-green-600'}[type] || 'bg-gray-700';
+         toast.classList.add(color);
+         toast.style.opacity = 1;
+         toastTimeout = setTimeout(() => { toast.style.opacity = 0; }, 3000);
+     }
+    </script>
+</body>
+</html>
