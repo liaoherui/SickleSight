@@ -28,8 +28,21 @@ SickleSight/
 ├── sicklesight_part2.py      # Pipeline 2: multi-frame morphology analysis (AR / ECC / circularity)
 ├── sicklesight_merged.py     # Pipeline 3: combined — state-ratio + morphology in one pass
 ├── sicklesight_env.yaml      # Conda environment specification
+├── index.html                # Browser-based image labeling tool
+├── tool.py                   # Post-processing statistical analysis & visualization GUI
 └── README.md
 ```
+
+---
+
+## Supplementary Tools
+
+Two additional standalone tools are included for data preparation and post-processing. Each has its own detailed documentation:
+
+| Tool | Description | Documentation |
+|------|-------------|---------------|
+| `index.html` | Browser-based image labeler for manually classifying cell crops into morphological classes | [Web Labeler Guide](docs/web-labeler.md) |
+| `tool.py` | Desktop GUI for generating publication-quality violin plots with statistical annotations from pipeline CSV outputs | [Analysis Tool Guide](docs/analysis-tool.md) |
 
 ---
 
