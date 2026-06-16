@@ -41,7 +41,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CELLBOX_MODELS_DIR = os.path.join(SCRIPT_DIR, 'CellBox-Models')
 DEFAULT_OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'output_default')
 DEFAULT_CELLPOSE_MODEL = os.path.join(CELLBOX_MODELS_DIR, 'cyto3_train0327')
-ANALYSIS_FPS = 4.0
+DEFAULT_ANALYSIS_FPS = 4.0
 
 DNAME = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G'}
 CLS_ID = {v: k for k, v in DNAME.items()}
@@ -1754,7 +1754,9 @@ parser.add_argument('-o', '--output_dir', type=str, default=DEFAULT_OUTPUT_DIR,
 parser.add_argument('--target_frames', type=str, default=None,
                     help='Comma-separated list of frame indices to analyze')
 parser.add_argument('--max_time', type=float, default=None,
-                    help='Analyze frame 0 and the frame at this many analysis seconds, using 4 frames/second (default: 120)')
+                    help='Analyze frame 0 and the frame at this many analysis seconds (default: 120)')
+parser.add_argument('--analysis_fps', type=float, default=DEFAULT_ANALYSIS_FPS,
+                    help='Analysis frames per second used to convert --max_time to frames (default: 4)')
 parser.add_argument('--full_video', action='store_true',
                     help='Analyze frame 0 and the final frame of each video')
 parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
@@ -1775,6 +1777,9 @@ parser.add_argument('--max_frame', type=int, default=480,
                     help='(Legacy parameter, not used in multi-frame mode)')
 
 args = parser.parse_args()
+
+if args.analysis_fps <= 0:
+    parser.error('--analysis_fps must be greater than 0')
 
 target_frames = None
 if args.target_frames:
@@ -1805,7 +1810,7 @@ for idx, video_path in enumerate(video_paths):
         if args.full_video:
             selected_frame = final_frame
         else:
-            selected_frame = min(int(round(args.max_time * ANALYSIS_FPS)), final_frame)
+            selected_frame = min(int(round(args.max_time * args.analysis_fps)), final_frame)
         per_video_target_frames = [0, selected_frame]
     combined_target_frames.update(per_video_target_frames)
 

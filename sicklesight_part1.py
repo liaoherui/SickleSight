@@ -225,7 +225,9 @@ parser.add_argument('--frame_skip', type=int, default=2,
 parser.add_argument('--max_frame', type=int, default=None,
                     help='Max frame index to process; used only when --max_time is not set')
 parser.add_argument('--max_time', type=float, default=None,
-                    help='Max analysis seconds at 4 frames/second (default: 120; shorter videos run fully)')
+                    help='Max analysis seconds (default: 120; shorter videos run fully)')
+parser.add_argument('--analysis_fps', type=float, default=4.0,
+                    help='Analysis frames per second used to convert --max_time to frames (default: 4)')
 parser.add_argument('--full_video', action='store_true',
                     help='Process each full video')
 parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
@@ -248,14 +250,17 @@ all_out = args.output_dir
 frame_skip = args.frame_skip
 max_frame = args.max_frame
 max_time = args.max_time
+analysis_fps = args.analysis_fps
 full_video = args.full_video
+if analysis_fps <= 0:
+    parser.error('--analysis_fps must be greater than 0')
 if full_video:
     max_time = None
 elif max_time is None and max_frame is None:
     max_time = 120.0
 output = [os.path.splitext(os.path.basename(v))[0] + '.avi' for v in video_paths]
 out_path = [os.path.join(all_out, os.path.splitext(os.path.basename(v))[0]) for v in video_paths]
-fps = 4  # 4 frames - 1 second
+fps = analysis_fps
 # print(video_paths,all_out,output,out_path)
 # exit()
 os.makedirs(all_out, exist_ok=True)

@@ -43,6 +43,7 @@ class SickleAnalysisGUI:
         self.selected_pipeline_var = tk.StringVar()
         self.tracking_backend_var = tk.StringVar(value="cellpose")
         self.max_seconds_var = tk.StringVar(value="120")
+        self.analysis_fps_var = tk.StringVar(value="4")
         
         self.script_output_dir = os.path.join(os.getcwd(), "_tmp_scripts")
         if not os.path.exists(self.script_output_dir):
@@ -155,9 +156,12 @@ class SickleAnalysisGUI:
                   font=('Helvetica', 9, 'bold')).pack(anchor=tk.W, pady=(10, 2))
         duration_frame = ttk.Frame(col2, style="Dark.TFrame")
         duration_frame.pack(fill=tk.X)
-        ttk.Label(duration_frame, text="Max seconds (4 frames/sec):", style="Dark.TLabel").pack(side=tk.LEFT)
+        ttk.Label(duration_frame, text="Max seconds:", style="Dark.TLabel").pack(side=tk.LEFT)
         self.entry_max_seconds = ttk.Entry(duration_frame, textvariable=self.max_seconds_var, width=8)
         self.entry_max_seconds.pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(duration_frame, text="Frames/sec:", style="Dark.TLabel").pack(side=tk.LEFT, padx=(12, 0))
+        self.entry_analysis_fps = ttk.Entry(duration_frame, textvariable=self.analysis_fps_var, width=6)
+        self.entry_analysis_fps.pack(side=tk.LEFT, padx=(6, 0))
 
         col3 = ttk.Frame(config_frame, style="Dark.TFrame")
         col3.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
@@ -339,6 +343,14 @@ class SickleAnalysisGUI:
         if max_seconds <= 0:
             messagebox.showwarning("Error", "Max seconds must be greater than 0.")
             return
+        try:
+            analysis_fps = float(self.analysis_fps_var.get())
+        except ValueError:
+            messagebox.showwarning("Error", "Frames/sec must be a number.")
+            return
+        if analysis_fps <= 0:
+            messagebox.showwarning("Error", "Frames/sec must be greater than 0.")
+            return
 
         # 1. RESOLVE SELECTED FILES: Prioritize highlighted Treeview items
         selected_items = self.tree.selection()
@@ -483,7 +495,10 @@ class SickleAnalysisGUI:
         return "\n".join(lines)
 
     def get_pipeline_extra_args(self, script_name):
-        args = [f"--max_time {self.max_seconds_var.get().strip()}"]
+        args = [
+            f"--max_time {self.max_seconds_var.get().strip()}",
+            f"--analysis_fps {self.analysis_fps_var.get().strip()}",
+        ]
         backend = self.tracking_backend_var.get()
         if backend != "cellpose":
             args.append(f"--tracking_backend {backend}")
