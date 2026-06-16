@@ -31,6 +31,11 @@ import os
 import pickle
 import torch.nn.functional as F
 
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
+
 print("DEBUG: IMPORT - 5")
 
 # =============================================================================
@@ -61,6 +66,18 @@ CLS_ID = {v: k for k, v in DNAME.items()}
 
 # Dense trend sampling step (Script-2)
 DENSE_TREND_STEP = 2
+
+# Low-resolution YOLO/BoT-SORT backend defaults, aligned with main_low_reso.py.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CELLBOX_MODELS_DIR = os.path.join(SCRIPT_DIR, 'CellBox-Models')
+DEFAULT_CELLPOSE_MODEL = os.path.join(CELLBOX_MODELS_DIR, 'cyto3_train0327')
+DEFAULT_LOW_RES_YOLO_MODEL = os.path.join(CELLBOX_MODELS_DIR, 'yolo', 'best.pt')
+DEFAULT_LOW_RES_SEG_MODEL = os.path.join(CELLBOX_MODELS_DIR, 'seg', 'best.pt')
+DEFAULT_LOW_RES_TRACKER_CONFIG = os.path.join(CELLBOX_MODELS_DIR, 'configs', 'botsort_cell.yaml')
+LOW_RES_REF_RESOLUTION = (5472, 3648)
+LOW_RES_MIN_CELL_AREA = 30000
+LOW_RES_EDGE_MARGIN = 3
+LOW_RES_EDGE_BOX_AR_MAX = 1.4
 
 # --- Nature-style colour palettes (Script-2 plots) ---
 COLOR_NS_AR   = "#2878B5"   # Science Blue  (Non-sickle / AR)
@@ -149,42 +166,42 @@ class SiameseViTChange(nn.Module):
 print("Loading models...")
 
 # 7-class model (Herui's)
-seven_class_model_path = 'best_model_vit_torch_macos_seven.pth'
+seven_class_model_path = os.path.join(CELLBOX_MODELS_DIR, 'best_model_vit_torch_macos_seven.pth')
 seven_class_model = ViTClassifier(num_classes=7)
 seven_class_model.load_state_dict(torch.load(seven_class_model_path, map_location=device))
 seven_class_model.to(device)
 seven_class_model.eval()
 
 # General binary model (Herui's)
-binary_model_path = 'best_model_vit_torch_macos_raw_vit_large_binary.pth'
+binary_model_path = os.path.join(CELLBOX_MODELS_DIR, 'best_model_vit_torch_macos_raw_vit_large_binary.pth')
 binary_model = ViTClassifier(num_classes=2)
 binary_model.load_state_dict(torch.load(binary_model_path, map_location=device))
 binary_model.to(device)
 binary_model.eval()
 
 # Class-D binary model (Brandon's)
-binary_model_path_D = "direct_vit_D.pt"
+binary_model_path_D = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_D.pt")
 binary_model_D = ViTClassifier(num_classes=2)
 binary_model_D.load_state_dict(torch.load(binary_model_path_D, map_location=device))
 binary_model_D.to(device)
 binary_model_D.eval()
 
 # Class-E binary model (Brandon's)
-binary_model_path_E = "direct_vit_E.pt"
+binary_model_path_E = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_E.pt")
 binary_model_E = ViTClassifier(num_classes=2)
 binary_model_E.load_state_dict(torch.load(binary_model_path_E, map_location=device))
 binary_model_E.to(device)
 binary_model_E.eval()
 
 # Class-G binary model (Brandon's)
-binary_model_path_Gb = "direct_vit_G.pt"
+binary_model_path_Gb = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_G.pt")
 binary_model_Gb = ViTClassifier(num_classes=2)
 binary_model_Gb.load_state_dict(torch.load(binary_model_path_Gb, map_location=device))
 binary_model_Gb.to(device)
 binary_model_Gb.eval()
 
 # Siamese all-class change-detection model (Haolin's)
-pair_model_path_All = "siamese_vit_All_Haolin.pt"
+pair_model_path_All = os.path.join(CELLBOX_MODELS_DIR, "siamese_vit_All_Haolin.pt")
 pair_model_All = SiameseViTChange()
 pair_model_All.load_state_dict(torch.load(pair_model_path_All, map_location=device))
 pair_model_All.to(device)
@@ -199,7 +216,7 @@ transform = transforms.Compose([
 ])
 
 # Pocked / Non-pocked binary model (Herui's) — used by Script-1 pipeline only
-binary_model_path_pock = "best_model_vit_torch_macos_raw_vit_large_binary_pocked.pth"
+binary_model_path_pock = os.path.join(CELLBOX_MODELS_DIR, "best_model_vit_torch_macos_raw_vit_large_binary_pocked.pth")
 binary_model_pock = ViTClassifier(num_classes=2)
 binary_model_pock.load_state_dict(torch.load(binary_model_path_pock, map_location=device))
 binary_model_pock.to(device)
@@ -280,6 +297,56 @@ def circularity(mask):
     if perimeter == 0 or area == 0:
         return 0.0
     return min((4 * np.pi * area) / (perimeter ** 2), 1.0)
+
+
+def bbox_morphology(w, h):
+    """Fallback morphology when no pixel mask is available."""
+    if min(w, h) <= 0:
+        return 1.0, 0.5, 0.5
+    return max(w, h) / min(w, h), 0.5, 0.5
+
+
+def compute_low_res_mask_morphology(crop, seg_model, conf_threshold=0.05):
+    """
+    Use the low-resolution YOLO-seg crop-mask method from main_low_reso.py for
+    AR/ECC/Circularity. Falls back to bbox morphology if the seg model misses.
+    """
+    h, w = crop.shape[:2]
+    fallback = bbox_morphology(w, h)
+    if seg_model is None or crop.size == 0:
+        return fallback
+
+    try:
+        results = seg_model.predict(source=crop, conf=conf_threshold, save=False, verbose=False)
+        if not results or results[0].masks is None or len(results[0].masks.data) == 0:
+            return fallback
+
+        masks = results[0].masks.data.cpu().numpy()
+        mask = masks[0]
+        mask_resized = cv2.resize(mask, (w, h))
+        binary = (mask_resized > 0.5).astype(np.uint8)
+
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return fallback
+
+        largest_contour = max(contours, key=cv2.contourArea)
+        if len(largest_contour) >= 5:
+            _, axes, _ = cv2.fitEllipse(largest_contour)
+            major_axis = max(axes)
+            minor_axis = min(axes)
+            ar_val = major_axis / minor_axis if minor_axis > 0 else fallback[0]
+        else:
+            rect = cv2.minAreaRect(largest_contour)
+            width, height = rect[1]
+            major_axis = max(width, height)
+            minor_axis = min(width, height)
+            ar_val = major_axis / minor_axis if minor_axis > 0 else fallback[0]
+
+        return ar_val, eccentricity(binary), circularity(binary)
+    except Exception as exc:
+        print(f"Warning: Low-res mask morphology failed; using bbox fallback: {exc}")
+        return fallback
 
 
 def segment_frame_downscaled_ds(original_frame, model_path, out_path,
@@ -363,6 +430,259 @@ def resize_frame(frame, ratio):
 def upscale_bbox(bbox, ratio):
     x, y, w, h = bbox
     return tuple(int(coord / ratio) for coord in (x, y, w, h))
+
+
+# =============================================================================
+# ─── LOW-RESOLUTION YOLO / BOTSORT BACKEND ───────────────────────────────────
+# =============================================================================
+
+def _reset_ultralytics_tracker(yolo_model):
+    """Reset tracker state between videos when Ultralytics exposes it."""
+    try:
+        if hasattr(yolo_model, "predictor") and yolo_model.predictor is not None:
+            if hasattr(yolo_model.predictor, "tracker") and yolo_model.predictor.tracker is not None:
+                yolo_model.predictor.tracker.reset()
+            elif hasattr(yolo_model.predictor, "trackers") and yolo_model.predictor.trackers:
+                trackers = yolo_model.predictor.trackers
+                tracker_iter = trackers.values() if isinstance(trackers, dict) else trackers
+                for tracker in tracker_iter:
+                    if hasattr(tracker, 'reset'):
+                        tracker.reset()
+        elif hasattr(yolo_model, "tracker") and yolo_model.tracker is not None:
+            yolo_model.tracker.reset()
+        yolo_model.predictor = None
+    except Exception as exc:
+        print(f"Warning: Could not reset YOLO tracker: {exc}")
+
+
+def init_low_res_backend(yolo_model_path, tracker_config_path, seg_model_path=None):
+    """Create per-video low-resolution backend state."""
+    if YOLO is None:
+        raise ImportError("ultralytics is required for --tracking_backend low_res.")
+    if not os.path.exists(yolo_model_path):
+        raise FileNotFoundError(f"Low-res YOLO model not found: {yolo_model_path}")
+    if not os.path.exists(tracker_config_path):
+        raise FileNotFoundError(f"Low-res tracker config not found: {tracker_config_path}")
+
+    yolo_model = YOLO(yolo_model_path)
+    _reset_ultralytics_tracker(yolo_model)
+
+    seg_model = None
+    if seg_model_path and os.path.exists(seg_model_path):
+        seg_model = YOLO(seg_model_path)
+    elif seg_model_path:
+        print(f"Warning: Low-res seg model not found; using bbox morphology fallback: {seg_model_path}")
+
+    return {
+        'yolo': yolo_model,
+        'seg_model': seg_model,
+        'tracker_config': tracker_config_path,
+        'invalid_ids': set(),
+        'used_ids': set(),
+        'next_id': 10000,
+        'first_frame_ids': set(),
+        'is_first_frame': True,
+        'last_known_pos': {},
+        'id_remap': {},
+        'last_processed_frame': None,
+        'max_jump_px': 200,
+        'max_recovery_px': 200,
+        'recovery_buffer': 60,
+    }
+
+
+def filter_low_res_boxes(results, img_w, img_h, min_cell_area=None,
+                         margin=LOW_RES_EDGE_MARGIN,
+                         edge_box_ar_max=LOW_RES_EDGE_BOX_AR_MAX):
+    """
+    Filter YOLO boxes following main_low_reso.py: remove too-small boxes and
+    elongated edge boxes, then NMS overlapping boxes while keeping larger cells.
+    """
+    filtered, ids = [], []
+    if min_cell_area is None:
+        min_cell_area = LOW_RES_MIN_CELL_AREA
+    if not hasattr(results, 'boxes') or results.boxes is None:
+        return filtered, ids
+
+    boxes = results.boxes
+    ids_raw = (boxes.id.cpu().numpy()
+               if (boxes.id is not None and len(boxes.id) > 0)
+               else np.arange(len(boxes.xyxy)))
+
+    for box, tid in zip(boxes.xyxy, ids_raw):
+        x1, y1, x2, y2 = box.cpu().numpy().astype(int)
+        x1 = max(0, min(int(x1), img_w - 1))
+        y1 = max(0, min(int(y1), img_h - 1))
+        x2 = max(0, min(int(x2), img_w))
+        y2 = max(0, min(int(y2), img_h))
+        w, h = x2 - x1, y2 - y1
+        if w <= 0 or h <= 0 or w * h < min_cell_area:
+            continue
+
+        at_edge = (x1 < margin or y1 < margin or
+                   x2 > img_w - margin or y2 > img_h - margin)
+        if at_edge and max(w, h) / max(min(w, h), 1) > edge_box_ar_max:
+            continue
+
+        filtered.append((x1, y1, x2, y2))
+        ids.append(int(tid))
+
+    if len(filtered) <= 1:
+        return filtered, ids
+
+    try:
+        import torchvision
+        boxes_t = torch.tensor(filtered, dtype=torch.float32)
+        areas = (boxes_t[:, 2] - boxes_t[:, 0]) * (boxes_t[:, 3] - boxes_t[:, 1])
+        keep = torchvision.ops.nms(boxes_t, areas, iou_threshold=0.4).tolist()
+        filtered = [filtered[i] for i in keep]
+        ids = [ids[i] for i in keep]
+    except Exception as exc:
+        print(f"Warning: Low-res NMS failed; keeping pre-NMS boxes: {exc}")
+
+    return filtered, ids
+
+
+def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5):
+    """
+    Probe early frames like main_low_reso.py to select a YOLO confidence value
+    based on detection density.
+    """
+    cap = cv2.VideoCapture(video_path)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total <= 1:
+        cap.release()
+        return 0.25
+
+    indices = np.linspace(5, min(total - 1, 100), n_frames, dtype=int)
+    fracs = []
+    for idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        results = yolo_model.predict(frame, conf=0.1, max_det=2000, verbose=False)[0]
+        if results.boxes is not None and len(results.boxes) > 0:
+            confs = results.boxes.conf.cpu().numpy()
+            fracs.append(float(np.mean(confs >= 0.9)))
+    cap.release()
+
+    if not fracs:
+        print("  [low-res auto-conf] No detections in probe frames; using 0.25")
+        return 0.25
+
+    avg_frac = float(np.mean(fracs))
+    if avg_frac >= 0.72:
+        conf, density = 0.80, "sparse"
+    elif avg_frac >= 0.62:
+        conf, density = 0.50, "medium"
+    else:
+        conf, density = 0.25, "dense"
+
+    print(f"  [low-res auto-conf] probed {len(fracs)} frames | "
+          f"high-conf-frac={avg_frac:.3f} | density={density} | conf={conf}")
+    return conf
+
+
+def resolve_low_res_det_conf(video_path, yolo_model, det_conf):
+    if isinstance(det_conf, str):
+        if det_conf.lower() == 'auto':
+            return auto_detect_low_res_conf(video_path, yolo_model)
+        try:
+            return float(det_conf)
+        except ValueError:
+            print(f"Warning: --low_res_det_conf '{det_conf}' invalid; using auto.")
+            return auto_detect_low_res_conf(video_path, yolo_model)
+    return float(det_conf)
+
+
+def detect_low_res_frame(low_res_state, frame, frame_idx, det_conf=0.25, yolo_iou=0.6):
+    """Run YOLO + BoT-SORT and return SickleSight-style detections."""
+    img_h, img_w = frame.shape[:2]
+    ref_w, ref_h = LOW_RES_REF_RESOLUTION
+    res_scale = (img_w * img_h) / (ref_w * ref_h)
+    adaptive_min_cell_area = max(100, int(LOW_RES_MIN_CELL_AREA * res_scale))
+
+    res = low_res_state['yolo'].track(
+        source=frame,
+        persist=True,
+        conf=det_conf,
+        iou=yolo_iou,
+        max_det=2000,
+        tracker=low_res_state['tracker_config'],
+        verbose=False,
+    )[0]
+
+    boxes, ids = filter_low_res_boxes(
+        res, img_w, img_h, min_cell_area=adaptive_min_cell_area)
+    detections = []
+    skipped = 0
+
+    for (x1, y1, x2, y2), orig_id in zip(boxes, ids):
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+
+        if orig_id in low_res_state['invalid_ids']:
+            while low_res_state['next_id'] in low_res_state['used_ids']:
+                low_res_state['next_id'] += 1
+            tid = low_res_state['next_id']
+        else:
+            tid = low_res_state['id_remap'].get(orig_id, orig_id)
+        low_res_state['used_ids'].add(tid)
+
+        if low_res_state['is_first_frame']:
+            low_res_state['first_frame_ids'].add(tid)
+            low_res_state['last_known_pos'][tid] = (cx, cy, frame_idx)
+        else:
+            if tid not in low_res_state['first_frame_ids']:
+                recovered_tid = None
+                best_dist = low_res_state['max_recovery_px']
+                for known_tid, (lx, ly, lf) in low_res_state['last_known_pos'].items():
+                    if known_tid not in low_res_state['first_frame_ids']:
+                        continue
+                    if frame_idx - lf > low_res_state['recovery_buffer']:
+                        continue
+                    dist = float(np.hypot(cx - lx, cy - ly))
+                    if dist < best_dist:
+                        best_dist = dist
+                        recovered_tid = known_tid
+                if recovered_tid is not None:
+                    low_res_state['id_remap'][orig_id] = recovered_tid
+                    tid = recovered_tid
+                    print(f"    [low-res ID recovery] new {orig_id} -> {recovered_tid} "
+                          f"(dist={best_dist:.1f}px, frame={frame_idx})")
+                else:
+                    skipped += 1
+                    continue
+
+            if tid in low_res_state['last_known_pos']:
+                lx, ly, lf = low_res_state['last_known_pos'][tid]
+                if lf == low_res_state['last_processed_frame']:
+                    jump = float(np.hypot(cx - lx, cy - ly))
+                    if jump > low_res_state['max_jump_px']:
+                        print(f"    [low-res spatial jump] ID {tid} at frame {frame_idx} "
+                              f"moved {jump:.1f}px; skipped")
+                        skipped += 1
+                        continue
+
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            low_res_state['invalid_ids'].add(orig_id)
+            skipped += 1
+            continue
+
+        low_res_state['last_known_pos'][tid] = (cx, cy, frame_idx)
+        detections.append({
+            'track_id': tid,
+            'bbox': (x1, y1, x2 - x1, y2 - y1),
+            'crop': crop,
+        })
+
+    low_res_state['is_first_frame'] = False
+    low_res_state['last_processed_frame'] = frame_idx
+    if skipped:
+        print(f"    Low-res backend skipped {skipped} boxes at frame {frame_idx}")
+
+    return detections
 
 
 # =============================================================================
@@ -1096,17 +1416,23 @@ def save_intermediate_results(cell_info, df, out_path,
 
 def process_video_combined(video_path, out_path, video_id, output_video_path,
                            seven_class_model, binary_model, feature_extractor, transform,
-                           cellpose_model_path='cyto3_train0327',
+                           cellpose_model_path=DEFAULT_CELLPOSE_MODEL,
                            frame_skip=2, max_frame=480, fps=4,
-                           target_frames=None):
+                           max_time_sec=120.0,
+                           target_frames=None,
+                           tracking_backend='cellpose',
+                           low_res_yolo_model_path=DEFAULT_LOW_RES_YOLO_MODEL,
+                           low_res_tracker_config_path=DEFAULT_LOW_RES_TRACKER_CONFIG,
+                           low_res_seg_model_path=DEFAULT_LOW_RES_SEG_MODEL,
+                           low_res_det_conf='auto',
+                           low_res_iou=0.6):
 
-    if target_frames is None:
-        target_frames = [0, 480]
-    if 0 not in target_frames:
-        target_frames = [0] + target_frames
-    target_frames       = sorted(target_frames)
-    target_frames_set   = set(target_frames)
-    save_image_frames   = {0, 480}          # frames where we save PNG images to disk
+    tracking_backend = tracking_backend.lower()
+    if tracking_backend == 'scdtrack':
+        tracking_backend = 'low_res'
+    if tracking_backend not in {'cellpose', 'low_res'}:
+        raise ValueError(f"Unknown tracking backend: {tracking_backend}")
+    use_low_res = tracking_backend == 'low_res'
 
     # ── Initialise video capture ──
     print('- Initialization......')
@@ -1117,13 +1443,39 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     fourcc     = cv2.VideoWriter_fourcc(*'MJPG')
     output_fps = fps / frame_skip
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if max_frame > total_frames:
-        max_frame = total_frames
+    max_valid_frame = max(0, total_frames - 1)
+    if max_time_sec is not None:
+        requested_max_frame = int(round(max_time_sec * fps))
+        max_frame = min(requested_max_frame, max_valid_frame)
+        print(f"  Max duration: {max_time_sec:g}s × {fps:.2f}fps -> frame {max_frame}")
+    else:
+        max_frame = min(max_frame, max_valid_frame)
+        print(f"  Max frame: {max_frame}")
 
-    valid_target_frames = [f for f in target_frames if f < total_frames]
+    if target_frames is None:
+        target_frames = [0, max_frame]
+    if 0 not in target_frames:
+        target_frames = [0] + target_frames
+    target_frames = sorted(set(target_frames))
+    target_frames_set = set(target_frames)
+    save_image_frames = set(target_frames)
+
+    valid_target_frames = [f for f in target_frames if f <= max_frame and f < total_frames]
     if len(valid_target_frames) < len(target_frames):
-        print(f'Warning: Some target frames exceed video length ({total_frames}). '
+        print(f'Warning: Some target frames exceed processing/video length ({max_frame}/{total_frames}). '
               f'Using: {valid_target_frames}')
+    low_res_state = None
+    if use_low_res:
+        print('- Initializing low-resolution YOLO/BoT-SORT backend......')
+        low_res_state = init_low_res_backend(
+            low_res_yolo_model_path,
+            low_res_tracker_config_path,
+            seg_model_path=low_res_seg_model_path,
+        )
+        low_res_det_conf = resolve_low_res_det_conf(
+            video_path, low_res_state['yolo'], low_res_det_conf)
+        print(f"  Low-res detection confidence: {low_res_det_conf}")
+        print('- Initializing low-resolution YOLO/BoT-SORT backend......Done~')
     print('- Initialization......Done~')
 
     # =========================================================================
@@ -1134,9 +1486,21 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
         raise ValueError("Cannot load frame 0 from the video.")
     cv2.imwrite(out_path + "/first_frame.png", first_frame)
 
-    bboxes_f0, masks_seg_f0, unique_ids_f0, _ = segment_frame_downscaled_ds(
-        first_frame, cellpose_model_path, out_path,
-        is_frame_0=True, save_mask=(0 in save_image_frames), frame_idx=0)
+    if use_low_res:
+        low_res_detections_f0 = detect_low_res_frame(
+            low_res_state, first_frame, 0,
+            det_conf=low_res_det_conf, yolo_iou=low_res_iou)
+        bboxes_f0 = {det['track_id']: det['bbox'] for det in low_res_detections_f0}
+        masks_seg_f0 = None
+        unique_ids_f0 = list(bboxes_f0.keys())
+        print(f"Low-res backend frame 0 detections kept: {len(unique_ids_f0)}")
+        if not unique_ids_f0:
+            print("Warning: Low-res backend found no usable cells in frame 0. "
+                  "Try lowering --low_res_det_conf or checking the first frame quality.")
+    else:
+        bboxes_f0, masks_seg_f0, unique_ids_f0, _ = segment_frame_downscaled_ds(
+            first_frame, cellpose_model_path, out_path,
+            is_frame_0=True, save_mask=(0 in save_image_frames), frame_idx=0)
 
     cell_info     = {}
     morph_records = []   # morphology rows — Sickle_Label added AFTER FP removal
@@ -1145,15 +1509,18 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     for cid in tqdm(unique_ids_f0, desc='Frame 0 cells'):
         if cid not in bboxes_f0:
             continue
-        mask     = (masks_seg_f0 == cid).astype(np.uint8)
-        ar_val   = aspect_ratio(mask)
-        ecc_val  = eccentricity(mask)
-        circ_val = circularity(mask)
-
         x, y, w, h = bboxes_f0[cid]
         cell_crop  = first_frame[y:y + h, x:x + w]
         if cell_crop.size == 0:
             continue
+        if use_low_res:
+            ar_val, ecc_val, circ_val = compute_low_res_mask_morphology(
+                cell_crop, low_res_state['seg_model'])
+        else:
+            mask     = (masks_seg_f0 == cid).astype(np.uint8)
+            ar_val   = aspect_ratio(mask)
+            ecc_val  = eccentricity(mask)
+            circ_val = circularity(mask)
         cell_pil    = Image.fromarray(cell_crop)
         cell_tensor = transform(cell_pil).unsqueeze(0)
 
@@ -1243,16 +1610,30 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
         if frame_idx in save_image_frames:
             cv2.imwrite(out_path + f"/frame_{frame_idx}.png", frame)
 
-        bboxes, masks, unique_ids, _ = segment_frame_downscaled_ds(
-            frame, cellpose_model_path, out_path, ratio=0.1, diameter=30,
-            frame_idx=frame_idx)
+        if use_low_res:
+            low_res_detections = detect_low_res_frame(
+                low_res_state, frame, frame_idx,
+                det_conf=low_res_det_conf, yolo_iou=low_res_iou)
+            bboxes = {det['track_id']: det['bbox'] for det in low_res_detections}
+            crops = {det['track_id']: det['crop'] for det in low_res_detections}
+            unique_ids = list(bboxes.keys())
+            masks = None
+            matched = {
+                tid: {'bbox': bbox, 'class': cell_info[tid]['class'], 'crop': crops[tid]}
+                for tid, bbox in bboxes.items()
+                if tid in cell_info
+            }
+        else:
+            bboxes, masks, unique_ids, _ = segment_frame_downscaled_ds(
+                frame, cellpose_model_path, out_path, ratio=0.1, diameter=30,
+                frame_idx=frame_idx)
 
-        matched, _ = match_cells_tracking(cell_info, masks, bboxes)
+            matched, _ = match_cells_tracking(cell_info, masks, bboxes)
 
         for cid, info in matched.items():
             x, y, w, h = info['bbox']
             cls_id     = info['class']
-            cell_crop  = frame[y:y + h, x:x + w]
+            cell_crop  = info.get('crop', frame[y:y + h, x:x + w])
             if cell_crop.size == 0:
                 continue
             cell_pil = Image.fromarray(cell_crop)
@@ -1287,20 +1668,22 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
             cell_info[cid]['latest_frame_index']            = frame_idx
 
             # ── Morphology: compute AR/ECC/Circularity from current masks ──
-            ar_val = ecc_val = circ_val = 0.0
-            for mask_cid in unique_ids:
-                if mask_cid in bboxes:
-                    mx, my, mw, mh = bboxes[mask_cid]
-                    if abs(mx - x) < 50 and abs(my - y) < 50:
-                        m        = (masks == mask_cid).astype(np.uint8)
-                        ar_val   = aspect_ratio(m)
-                        ecc_val  = eccentricity(m)
-                        circ_val = circularity(m)
-                        break
-            if ar_val == 0.0:   # fallback: estimate from bbox
-                ar_val   = max(w, h) / min(w, h) if min(w, h) > 0 else 1.0
-                ecc_val  = 0.5
-                circ_val = 0.5
+            if use_low_res:
+                ar_val, ecc_val, circ_val = compute_low_res_mask_morphology(
+                    cell_crop, low_res_state['seg_model'])
+            else:
+                ar_val = ecc_val = circ_val = 0.0
+                for mask_cid in unique_ids:
+                    if mask_cid in bboxes:
+                        mx, my, mw, mh = bboxes[mask_cid]
+                        if abs(mx - x) < 50 and abs(my - y) < 50:
+                            m        = (masks == mask_cid).astype(np.uint8)
+                            ar_val   = aspect_ratio(m)
+                            ecc_val  = eccentricity(m)
+                            circ_val = circularity(m)
+                            break
+                if ar_val == 0.0:   # fallback: estimate from bbox
+                    ar_val, ecc_val, circ_val = bbox_morphology(w, h)
 
             morph_records.append({
                 'Cell_ID':      cid,
@@ -1344,7 +1727,7 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     frame_stats_14groups = []
     num_classes          = 7
 
-    for frame_index in range(max_frame):
+    for frame_index in range(max_frame + 1):
         ret, frame = cap.read()
         if not ret:
             break
@@ -1445,15 +1828,18 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     # Pie chart
     sizes         = [class_counts_final.get(i, 0) for i in range(7)]
     total_cells   = sum(sizes)
-    percentages   = [s / total_cells * 100 for s in sizes]
-    legend_labels = [f'{DNAME[i]}: {sizes[i]} ({percentages[i]:.1f}%)' for i in range(7)]
-    fig, ax = plt.subplots(figsize=(8, 6))
-    wedges, _ = ax.pie(sizes, startangle=140, colors=colors7, wedgeprops=dict(width=0.5))
-    ax.legend(wedges, legend_labels, title="Classes", loc="center left",
-              bbox_to_anchor=(0.92, 0.5), fontsize=10)
-    ax.set_title("Class Distribution in Frame 0", fontsize=14)
-    plt.tight_layout()
-    plt.savefig(out_path + "/frame0_class_pie.png", dpi=300);  plt.close()
+    if total_cells > 0:
+        percentages   = [s / total_cells * 100 for s in sizes]
+        legend_labels = [f'{DNAME[i]}: {sizes[i]} ({percentages[i]:.1f}%)' for i in range(7)]
+        fig, ax = plt.subplots(figsize=(8, 6))
+        wedges, _ = ax.pie(sizes, startangle=140, colors=colors7, wedgeprops=dict(width=0.5))
+        ax.legend(wedges, legend_labels, title="Classes", loc="center left",
+                  bbox_to_anchor=(0.92, 0.5), fontsize=10)
+        ax.set_title("Class Distribution in Frame 0", fontsize=14)
+        plt.tight_layout()
+        plt.savefig(out_path + "/frame0_class_pie.png", dpi=300);  plt.close()
+    else:
+        print(f"Warning: No cells were initialized for {video_id}; skipping frame0_class_pie.png")
 
     # DataFrames
     df = pd.DataFrame(frame_stats)
@@ -1569,19 +1955,41 @@ parser.add_argument('-o', '--output_dir', type=str, required=True,
                     help='Output directory')
 parser.add_argument('--frame_skip', type=int, default=2,
                     help='Process every Nth frame (default: 2)')
-parser.add_argument('--max_frame', type=int, default=480,
-                    help='Max frames to process (default: 480)')
-parser.add_argument('--target_frames', type=str, default='0,480',
-                    help='Comma-separated frame indices for morphology violin plots (default: 0,480)')
+parser.add_argument('--max_time', type=float, default=None,
+                    help='Max duration to process per video in seconds (default: 120; shorter videos run fully)')
+parser.add_argument('--max_frame', type=int, default=None,
+                    help='Max frame index to process; used only when --max_time is not set')
+parser.add_argument('--target_frames', type=str, default=None,
+                    help='Comma-separated frame indices for morphology violin plots (default: 0 and final processed frame)')
+parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
+                    help='Segmentation/tracking backend: cellpose or low_res YOLO/BoT-SORT (default: cellpose)')
+parser.add_argument('--low_res_yolo_model', type=str, default=DEFAULT_LOW_RES_YOLO_MODEL,
+                    help='Path to low-resolution YOLO detection model')
+parser.add_argument('--low_res_seg_model', type=str, default=DEFAULT_LOW_RES_SEG_MODEL,
+                    help='Path to low-resolution YOLO-seg model for mask-based morphology')
+parser.add_argument('--low_res_tracker_config', type=str, default=DEFAULT_LOW_RES_TRACKER_CONFIG,
+                    help='Path to low-resolution BoT-SORT tracker YAML')
+parser.add_argument('--low_res_det_conf', type=str, default='auto',
+                    help='Low-resolution YOLO detection confidence: float or "auto" (default: auto)')
+parser.add_argument('--low_res_iou', type=float, default=0.6,
+                    help='Low-resolution YOLO tracking IOU threshold (default: 0.6)')
 
 args = parser.parse_args()
 
 video_paths   = args.inputs.split(',')
 all_out       = args.output_dir
 frame_skip    = args.frame_skip
-max_frame     = args.max_frame
-target_frames = [int(f.strip()) for f in args.target_frames.split(',')]
-print(f"Frame skip: {frame_skip}  |  Max frame: {max_frame}  |  Target frames for plots: {target_frames}")
+max_time_sec  = args.max_time
+max_frame     = args.max_frame if args.max_frame is not None else 480
+if max_time_sec is None and args.max_frame is None:
+    max_time_sec = 120.0
+target_frames = None
+if args.target_frames:
+    target_frames = [int(f.strip()) for f in args.target_frames.split(',') if f.strip()]
+limit_desc = f"Max duration: {max_time_sec:g}s" if max_time_sec is not None else f"Max frame: {max_frame}"
+target_desc = target_frames if target_frames is not None else "0 + final processed frame"
+print(f"Frame skip: {frame_skip}  |  {limit_desc}  |  Target frames for plots: {target_desc}")
+print(f"Tracking backend: {args.tracking_backend}")
 
 output   = [os.path.splitext(os.path.basename(v))[0] + '.avi' for v in video_paths]
 out_path = [os.path.join(all_out, os.path.splitext(os.path.basename(v))[0]) for v in video_paths]
@@ -1623,8 +2031,15 @@ for idx, video_path in enumerate(video_paths):
         transform=transform,
         frame_skip=frame_skip,
         max_frame=max_frame,
+        max_time_sec=max_time_sec,
         fps=fps,
-        target_frames=target_frames)
+        target_frames=target_frames,
+        tracking_backend=args.tracking_backend,
+        low_res_yolo_model_path=args.low_res_yolo_model,
+        low_res_tracker_config_path=args.low_res_tracker_config,
+        low_res_seg_model_path=args.low_res_seg_model,
+        low_res_det_conf=args.low_res_det_conf,
+        low_res_iou=args.low_res_iou)
 
     all_stats.append(df)
     all_class_counts.update(class_count)
@@ -1721,19 +2136,27 @@ plot_14_groups_ratio(final_df_14groups,
 
 sizes         = [all_class_counts.get(i, 0) for i in range(7)]
 total_cells   = sum(sizes)
-percentages   = [s / total_cells * 100 for s in sizes]
-legend_labels = [f'{DNAME[i]}: {sizes[i]} ({percentages[i]:.1f}%)' for i in range(7)]
-fig, ax = plt.subplots(figsize=(8, 6))
-wedges, _ = ax.pie(sizes, startangle=140, colors=colors7, wedgeprops=dict(width=0.5))
-ax.legend(wedges, legend_labels, title="Classes", loc="center left",
-          bbox_to_anchor=(0.92, 0.5), fontsize=10)
-ax.set_title("Total Class Distribution in Frame 0 Across All Videos", fontsize=14)
-plt.tight_layout()
-plt.savefig(all_out + "/combined_frame0_class_pie.png", dpi=300);  plt.close()
+if total_cells > 0:
+    percentages   = [s / total_cells * 100 for s in sizes]
+    legend_labels = [f'{DNAME[i]}: {sizes[i]} ({percentages[i]:.1f}%)' for i in range(7)]
+    fig, ax = plt.subplots(figsize=(8, 6))
+    wedges, _ = ax.pie(sizes, startangle=140, colors=colors7, wedgeprops=dict(width=0.5))
+    ax.legend(wedges, legend_labels, title="Classes", loc="center left",
+              bbox_to_anchor=(0.92, 0.5), fontsize=10)
+    ax.set_title("Total Class Distribution in Frame 0 Across All Videos", fontsize=14)
+    plt.tight_layout()
+    plt.savefig(all_out + "/combined_frame0_class_pie.png", dpi=300);  plt.close()
+else:
+    print("Warning: No initialized cells across all videos; skipping combined_frame0_class_pie.png")
 
 
 # ── Pipeline-2 combined ──
 if not all_videos_df.empty:
+    combined_target_frames = target_frames
+    if combined_target_frames is None:
+        captured_frames = sorted(all_videos_df['Frame_Index'].unique())
+        combined_target_frames = [captured_frames[0], captured_frames[-1]]
+
     all_videos_df.to_csv(all_out + '/combined_all_videos_raw_data.csv', index=False)
     calculate_statistics_summary(all_videos_df, ['Frame_Index', 'Sickle_Label'],
                                  'Aspect_Ratio').to_csv(all_out + '/combined_stats_ar.csv',   index=False)
@@ -1742,9 +2165,9 @@ if not all_videos_df.empty:
     calculate_statistics_summary(all_videos_df, ['Frame_Index', 'Sickle_Label'],
                                  'Circularity' ).to_csv(all_out + '/combined_stats_circ.csv', index=False)
 
-    save_image_frames_combined = {480}
+    save_image_frames_combined = set(combined_target_frames)
     print("\nGenerating combined violin plots...")
-    for frame_idx in target_frames:
+    for frame_idx in combined_target_frames:
         if frame_idx not in save_image_frames_combined:
             continue
         frame_df = all_videos_df[all_videos_df['Frame_Index'] == frame_idx]
@@ -1762,12 +2185,12 @@ if not all_videos_df.empty:
         plot_7class_nature_style_circ( frame_df.copy(), pfx + '_violin_7class_circ.png',         frame_idx)
         print(f"  - Generated combined violin plots for frame {frame_idx}")
 
-    plot_multiframe_comparison_ar(  all_videos_df, all_out + '/combined_multiframe_comparison_ar.png',   target_frames)
-    plot_multiframe_comparison_ecc( all_videos_df, all_out + '/combined_multiframe_comparison_ecc.png',  target_frames)
-    plot_multiframe_comparison_circ(all_videos_df, all_out + '/combined_multiframe_comparison_circ.png', target_frames)
+    plot_multiframe_comparison_ar(  all_videos_df, all_out + '/combined_multiframe_comparison_ar.png',   combined_target_frames)
+    plot_multiframe_comparison_ecc( all_videos_df, all_out + '/combined_multiframe_comparison_ecc.png',  combined_target_frames)
+    plot_multiframe_comparison_circ(all_videos_df, all_out + '/combined_multiframe_comparison_circ.png', combined_target_frames)
 
     trend_stats = plot_multiframe_trend(all_videos_df, all_out + '/combined_multiframe_trend.png',
-                                        target_frames, max(target_frames))
+                                        combined_target_frames, max(combined_target_frames))
     if trend_stats is not None:
         trend_stats.to_csv(all_out + '/combined_multiframe_trend_stats.csv', index=False)
 else:
@@ -1804,4 +2227,4 @@ print("    combined_stats_ar/ecc/circ.csv")
 print("    combined_frameX_violin_*.png")
 print("    combined_multiframe_comparison_*.png")
 print("    combined_multiframe_trend.png")
-print(f"\n形态分析的目标帧: {target_frames}")
+print(f"\n形态分析的目标帧: {target_frames if target_frames is not None else '0 + final processed frame'}")

@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import re
+import shlex
 import sys
 import platform
 import subprocess
@@ -38,14 +39,19 @@ class SickleAnalysisGUI:
 
         self.selected_folders = [] 
         self.pipeline_dir = ""
-        self.output_dir = "" 
+        self.output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output_default")
         self.selected_pipeline_var = tk.StringVar()
+        self.tracking_backend_var = tk.StringVar(value="cellpose")
+        self.max_seconds_var = tk.StringVar(value="120")
         
         self.script_output_dir = os.path.join(os.getcwd(), "_tmp_scripts")
         if not os.path.exists(self.script_output_dir):
             os.makedirs(self.script_output_dir)
 
         self.create_layout()
+        os.makedirs(self.output_dir, exist_ok=True)
+        self.lbl_out_path.config(text=self.output_dir)
+        self.load_pipeline_folder(os.path.dirname(os.path.abspath(__file__)), show_warning=False)
 
     def create_layout(self):
         main_container = ttk.Frame(self.root, style="Dark.TFrame")
@@ -112,6 +118,24 @@ class SickleAnalysisGUI:
         self.radio_frame = ttk.Frame(col1, style="Dark.TFrame")
         self.radio_frame.pack(fill=tk.BOTH, expand=True)
 
+        ttk.Label(col1, text="Segmentation / Tracking:", style="Dark.TLabel",
+                  font=('Helvetica', 9, 'bold')).pack(anchor=tk.W, pady=(8, 0))
+        backend_frame = ttk.Frame(col1, style="Dark.TFrame")
+        backend_frame.pack(fill=tk.X, padx=5, pady=(2, 2))
+        backend_options = [
+            ("Cellpose", "cellpose"),
+            ("Low-resolution YOLO/BoT-SORT", "low_res"),
+        ]
+        for label, value in backend_options:
+            rb = ttk.Radiobutton(
+                backend_frame,
+                text=label,
+                variable=self.tracking_backend_var,
+                value=value,
+                style="Dark.TRadiobutton"
+            )
+            rb.pack(anchor=tk.W)
+
         col2 = ttk.Frame(config_frame, style="Dark.TFrame")
         col2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
@@ -126,6 +150,14 @@ class SickleAnalysisGUI:
         out_btn.pack(fill=tk.X, pady=2)
         self.lbl_out_path = ttk.Label(col2, text="[Output Folder Not Selected]", style="Dark.TLabel", font=('Consolas', 8))
         self.lbl_out_path.pack(anchor=tk.W)
+
+        ttk.Label(col2, text="3. Analysis Duration:", style="Dark.TLabel",
+                  font=('Helvetica', 9, 'bold')).pack(anchor=tk.W, pady=(10, 2))
+        duration_frame = ttk.Frame(col2, style="Dark.TFrame")
+        duration_frame.pack(fill=tk.X)
+        ttk.Label(duration_frame, text="Max seconds:", style="Dark.TLabel").pack(side=tk.LEFT)
+        self.entry_max_seconds = ttk.Entry(duration_frame, textvariable=self.max_seconds_var, width=8)
+        self.entry_max_seconds.pack(side=tk.LEFT, padx=(6, 0))
 
         col3 = ttk.Frame(config_frame, style="Dark.TFrame")
         col3.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
@@ -206,36 +238,52 @@ class SickleAnalysisGUI:
     def select_pipeline_folder(self):
         path = filedialog.askdirectory(title="Select folder containing pipeline scripts")
         if path:
-            self.pipeline_dir = path
-            self.lbl_pipe_path.config(text=path)
-            
-            for widget in self.radio_frame.winfo_children():
-                if isinstance(widget, ttk.Radiobutton):
-                    widget.destroy()
+            self.load_pipeline_folder(path, show_warning=True)
 
-            found = False
-            detected_scripts = []
-            try:
-                for file_name in os.listdir(path):
-                    if file_name.startswith("sicklesight_") and file_name.endswith(".py"):
-                        if re.search('gui',file_name):continue
-                        detected_scripts.append(file_name)
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not read directory: {e}")
-                return
+    def load_pipeline_folder(self, path, show_warning=True):
+        self.pipeline_dir = path
+        self.lbl_pipe_path.config(text=path)
 
-            detected_scripts.sort()
+        for widget in self.radio_frame.winfo_children():
+            if isinstance(widget, ttk.Radiobutton):
+                widget.destroy()
 
-            for script_name in detected_scripts:
-                rb = ttk.Radiobutton(self.radio_frame, text=script_name, variable=self.selected_pipeline_var, value=script_name, style="Dark.TRadiobutton")
-                rb.pack(anchor=tk.W, padx=5, pady=2)
-                
-                if not found:
-                    self.selected_pipeline_var.set(script_name)
-                    found = True
-            
-            if not found:
-                messagebox.showwarning("Warning", "No files starting with 'pipeline_' and ending with '.py' were found in this folder.")
+        found = False
+        detected_scripts = []
+        try:
+            for file_name in os.listdir(path):
+                if file_name.startswith("sicklesight_") and file_name.endswith(".py"):
+                    if re.search('gui', file_name):
+                        continue
+                    detected_scripts.append(file_name)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read directory: {e}")
+            return
+
+        detected_scripts.sort()
+
+        preferred_script = "sicklesight_merged.py"
+        for script_name in detected_scripts:
+            rb = ttk.Radiobutton(
+                self.radio_frame,
+                text=script_name,
+                variable=self.selected_pipeline_var,
+                value=script_name,
+                style="Dark.TRadiobutton"
+            )
+            rb.pack(anchor=tk.W, padx=5, pady=2)
+
+            if script_name == preferred_script:
+                self.selected_pipeline_var.set(script_name)
+                found = True
+            elif not found:
+                self.selected_pipeline_var.set(script_name)
+                found = True
+
+        if not found:
+            self.selected_pipeline_var.set("")
+            if show_warning:
+                messagebox.showwarning("Warning", "No sicklesight pipeline scripts were found in this folder.")
 
     def select_output_folder(self):
         path = filedialog.askdirectory(title="Select Output Folder")
@@ -283,6 +331,22 @@ class SickleAnalysisGUI:
         if not self.output_dir:
             messagebox.showwarning("Error", "Output folder not selected.")
             return
+        if (self.tracking_backend_var.get() != "cellpose" and
+                os.path.basename(self.selected_pipeline_var.get()) != "sicklesight_merged.py"):
+            messagebox.showwarning(
+                "Pipeline Option",
+                "Low-resolution segmentation/tracking is currently implemented for sicklesight_merged.py."
+            )
+            return
+        if os.path.basename(self.selected_pipeline_var.get()) == "sicklesight_merged.py":
+            try:
+                max_seconds = float(self.max_seconds_var.get())
+            except ValueError:
+                messagebox.showwarning("Error", "Max seconds must be a number.")
+                return
+            if max_seconds <= 0:
+                messagebox.showwarning("Error", "Max seconds must be greater than 0.")
+                return
 
         # 1. RESOLVE SELECTED FILES: Prioritize highlighted Treeview items
         selected_items = self.tree.selection()
@@ -344,6 +408,8 @@ class SickleAnalysisGUI:
 
     def generate_bat_content(self, grouped_files):
         script_name = self.selected_pipeline_var.get()
+        extra_args = self.get_pipeline_extra_args(script_name)
+        python_exe = sys.executable
         lines = ["@echo off", "setlocal EnableDelayedExpansion"]
         lines.append('set "PYTHONIOENCODING=utf-8"')
         lines.append(f'cd /d "{self.pipeline_dir}"')
@@ -380,7 +446,8 @@ class SickleAnalysisGUI:
     set "OMP_NUM_THREADS=1"
 
     echo Running {script_name}...
-    python "{script_name}" -i "!INPUTS!" -o "%USER_OUTPUT_ROOT%\\!OUTPUT_FOLDER!"
+    echo Python: "{python_exe}"
+    "{python_exe}" "{script_name}" -i "!INPUTS!" -o "%USER_OUTPUT_ROOT%\\!OUTPUT_FOLDER!" {extra_args}
 
     del "!VIDEO_LIST_FILE!"
 """
@@ -392,6 +459,8 @@ class SickleAnalysisGUI:
 
     def generate_sh_content(self, grouped_files):
         script_name = self.selected_pipeline_var.get()
+        extra_args = self.get_pipeline_extra_args(script_name)
+        python_exe = shlex.quote(sys.executable)
         lines = ["#!/bin/bash"]
         lines.append('export PYTHONIOENCODING=utf-8')
         lines.append(f'cd "{self.pipeline_dir}" || exit 1')
@@ -415,10 +484,20 @@ class SickleAnalysisGUI:
                 lines.append('export KMP_DUPLICATE_LIB_OK=TRUE')
                 lines.append('export OMP_NUM_THREADS=1')
                 lines.append(f'echo "Running {script_name}..."')
-                lines.append(f'python3 "{script_name}" -i "$INPUTS" -o "$USER_OUTPUT_ROOT/$OUTPUT_FOLDER"')
+                lines.append(f'echo "Python: {python_exe}"')
+                lines.append(f'{python_exe} "{script_name}" -i "$INPUTS" -o "$USER_OUTPUT_ROOT/$OUTPUT_FOLDER" {extra_args}')
 
         lines.append('\necho "Done."')
         return "\n".join(lines)
+
+    def get_pipeline_extra_args(self, script_name):
+        if os.path.basename(script_name) != "sicklesight_merged.py":
+            return ""
+        args = [f"--max_time {self.max_seconds_var.get().strip()}"]
+        backend = self.tracking_backend_var.get()
+        if backend != "cellpose":
+            args.append(f"--tracking_backend {backend}")
+        return " ".join(args)
 
     def execute_script(self, script_path):
         abs_path = os.path.abspath(script_path)

@@ -1,6 +1,6 @@
 # SickleSight
 
-**SickleSight** is an AI-based toolkit for quantitative analysis of sickle cell disease dynamics from video microscopy data. It combines deep learning segmentation, Vision Transformer (ViT) classification, Siamese network state detection, and optical flow tracking to characterize individual red blood cells across time: producing publication-quality statistics, visualizations, and annotated videos.
+**SickleSight** is an AI-based toolkit for quantitative analysis of sickle cell disease dynamics from video microscopy data. It combines cell segmentation/tracking, Vision Transformer (ViT) classification, Siamese network state detection, and morphology analysis to produce CSV reports, publication-quality figures, and annotated videos.
 
 
 ---
@@ -16,6 +16,7 @@
 - **Batch processing**: process multiple videos in one run
 - **Cross-platform GUI** (Windows / macOS / Linux) for point-and-click operation
 - **Command-line interface**: all three analysis scripts can also be run directly from the terminal
+- **Low-resolution mode**: optional YOLO/BoT-SORT tracking backend for videos where Cellpose segmentation is unreliable
 
 ---
 
@@ -23,6 +24,7 @@
 
 ```
 SickleSight/
+├── CellBox-Models/           # Model folder used by default
 ├── sicklesight_gui.py        # GUI application — launch this to open the graphical interface
 ├── sicklesight_part1.py      # Pipeline 1: temporal state-ratio analysis
 ├── sicklesight_part2.py      # Pipeline 2: multi-frame morphology analysis (AR / ECC / circularity)
@@ -62,13 +64,35 @@ conda env create -f sicklesight_env.yaml
 conda activate sicklesight
 ```
 
+The environment includes `ultralytics`, which is required for the low-resolution YOLO/BoT-SORT backend.
+
 ### 3. Download pre-trained models
 
-Download **sicklesight-Models.zip** from the link below and unzip its contents into the **same directory as the scripts**:
+Model files are too large to store directly in GitHub. Download **CellBox-Models.zip** from Dropbox, then unzip it into the repository root:
 
-> **[Download sicklesight-Models.zip](https://www.dropbox.com/scl/fi/f4roqang8cwm6cazw9qiw/sicklesight-Models.zip?rlkey=aj4wk4xekau0y4dj56850b18l&st=ccsuhdnh&dl=0)**
+> **[Download CellBox-Models.zip](https://www.dropbox.com/scl/fi/f4roqang8cwm6cazw9qiw/sicklesight-Models.zip?rlkey=aj4wk4xekau0y4dj56850b18l&st=ccsuhdnh&dl=0)**
 
-After extraction, your directory should contain `.pth` / `.pt` model files alongside the Python scripts.
+After extraction, the repository should contain:
+
+```text
+SickleSight/
+└── CellBox-Models/
+    ├── cyto3_train0327
+    ├── best_model_vit_torch_macos_seven.pth
+    ├── best_model_vit_torch_macos_raw_vit_large_binary.pth
+    ├── best_model_vit_torch_macos_raw_vit_large_binary_pocked.pth
+    ├── direct_vit_D.pt
+    ├── direct_vit_E.pt
+    ├── direct_vit_G.pt
+    ├── siamese_vit_All_Haolin.pt
+    ├── yolo/best.pt
+    ├── seg/best.pt
+    ├── efficientnet/fold1_best.pth ... fold5_best.pth
+    ├── siamese/model.pth
+    └── configs/botsort_cell.yaml
+```
+
+The standard SickleSight backend uses the `.pth/.pt` and `cyto3_train0327` files. The low-resolution backend uses `yolo/`, `seg/`, and `configs/botsort_cell.yaml`.
 
 ---
 
@@ -87,13 +111,13 @@ python sicklesight_gui.py
 
 1. Click **Add Parent Folder** — the GUI recursively scans for `.mp4` video files and displays them in a file tree.
 2. Select specific videos or entire folders from the tree.
-3. Choose a **Pipeline script** from the dropdown:
-   - `sicklesight_part1` — temporal state-ratio analysis
-   - `sicklesight_part2` — multi-frame morphology analysis
-   - `sicklesight_merged` — both analyses combined
-4. Set the **Pipeline Folder** (directory containing the scripts and model files).
-5. Set the **Output Directory** where results will be saved.
-6. Click **Generate Script & Run Analysis** — the GUI generates a platform-specific shell script and executes it, streaming live output to the built-in terminal pane.
+3. Choose a **Pipeline script**. The GUI defaults to the folder containing `sicklesight_gui.py` and selects `sicklesight_merged.py` when available.
+4. Choose **Segmentation / Tracking**:
+   - `Cellpose` for standard-resolution videos
+   - `Low-resolution YOLO/BoT-SORT` for low-resolution videos
+5. Set **Max seconds**. The default is `120`; shorter videos are processed fully.
+6. Confirm the **Output Folder**. The default is `output_default/` beside the GUI script.
+7. Click **Generate Script & Run Analysis**.
 
 ---
 
@@ -182,8 +206,8 @@ python sicklesight_merged.py \
     -i video1.mp4,video2.mp4 \
     -o /path/to/output \
     [--frame_skip 2] \
-    [--max_frame 480] \
-    [--target_frames 0,480]
+    [--max_time 120] \
+    [--tracking_backend cellpose|low_res]
 ```
 
 | Argument | Required | Default | Description |
@@ -191,17 +215,32 @@ python sicklesight_merged.py \
 | `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
 | `-o` / `--output_dir` | Yes | — | Output directory |
 | `--frame_skip` | No | `2` | Process every N-th frame |
-| `--max_frame` | No | `480` | Maximum number of frames to process per video |
-| `--target_frames` | No | `0,480` | Comma-separated frame indices for morphology violin plots |
+| `--max_time` | No | `120` | Maximum seconds to process per video; shorter videos run fully |
+| `--max_frame` | No | — | Frame-based limit, used only when `--max_time` is not set |
+| `--target_frames` | No | `0` and final processed frame | Comma-separated frame indices for morphology violin plots |
+| `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
+| `--low_res_det_conf` | No | `auto` | YOLO detection confidence for low-resolution mode; accepts `auto` or a number |
 
 **Output files:** all files from Pipeline 1 and Pipeline 2 combined.
+
+Low-resolution example:
+
+```bash
+python sicklesight_merged.py \
+    -i 2156-0%-4.mp4 \
+    -o output_low_res_test \
+    --tracking_backend low_res \
+    --max_time 120
+```
 
 ---
 
 ## Methods Overview
 
-### Cell Segmentation
-Individual cells are segmented using **Cellpose 3** (`cyto3` pre-trained model). Frames are downscaled to 20% before segmentation for speed, and masks are upscaled back to original resolution.
+### Segmentation / Tracking
+The default backend uses **Cellpose 3** (`cyto3_train0327`) for segmentation and SickleSight's original matching logic for tracking.
+
+For low-resolution videos, use `--tracking_backend low_res`. This backend uses YOLO/BoT-SORT for detection and tracking, then keeps the original SickleSight classification, Siamese state detection, statistics, and output format. YOLO-seg is used only to estimate morphology from each cell crop; if a mask is unavailable, bbox-based morphology is used as a fallback.
 
 ### 7-Class Morphological Classification
 A fine-tuned **Vision Transformer (ViT-Base, patch 16×16)** classifies each cell at frame 0 into one of 7 morphological classes (A–G), reflecting shape severity from normal biconcave disc (A) to fully sickled forms (G).
