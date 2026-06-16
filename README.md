@@ -70,7 +70,7 @@ The environment includes `ultralytics`, which is required for the low-resolution
 
 Model files are too large to store directly in GitHub. Download **CellBox-Models.zip** from Dropbox, then unzip it into the repository root:
 
-> **[Download CellBox-Models.zip](https://www.dropbox.com/scl/fi/f4roqang8cwm6cazw9qiw/sicklesight-Models.zip?rlkey=aj4wk4xekau0y4dj56850b18l&st=ccsuhdnh&dl=0)**
+> **[Download CellBox-Models.zip](https://www.dropbox.com/scl/fi/0a4seofjgniqbq4i6x0f3/CellBox-Models.zip?rlkey=6cwzmzxrzs86t19az6eioi89q&st=xail4oqy&dl=0)**
 
 After extraction, the repository should contain:
 
