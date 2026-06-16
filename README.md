@@ -125,6 +125,45 @@ python sicklesight_gui.py
 
 All three analysis scripts accept the same core arguments and can be used independently from the terminal without the GUI.
 
+
+---
+
+#### Pipeline 3: Combined Analysis (`sicklesight_merged.py`)
+
+Runs both Pipeline 1 (see below) and Pipeline 2 (see below) in a single pass — more efficient than running them sequentially.
+
+```bash
+python sicklesight_merged.py \
+    -i video1.mp4,video2.mp4 \
+    -o /path/to/output \
+    [--frame_skip 2] \
+    [--max_time 120] \
+    [--tracking_backend cellpose|low_res]
+```
+
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
+| `-o` / `--output_dir` | Yes | — | Output directory |
+| `--frame_skip` | No | `2` | Process every N-th frame |
+| `--max_time` | No | `120` | Maximum seconds to process per video; shorter videos run fully |
+| `--max_frame` | No | — | Frame-based limit, used only when `--max_time` is not set |
+| `--target_frames` | No | `0` and final processed frame | Comma-separated frame indices for morphology violin plots |
+| `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
+| `--low_res_det_conf` | No | `auto` | YOLO detection confidence for low-resolution mode; accepts `auto` or a number |
+
+**Output files:** all files from Pipeline 1 and Pipeline 2 combined.
+
+Low-resolution example:
+
+```bash
+python sicklesight_merged.py \
+    -i 2156-0%-4.mp4 \
+    -o output_low_res_test \
+    --tracking_backend low_res \
+    --max_time 120
+```
+
 ---
 
 #### Pipeline 1: Temporal State-Ratio Analysis (`sicklesight_part1.py`)
@@ -197,43 +236,6 @@ python sicklesight_part2.py \
 
 ---
 
-#### Pipeline 3: Combined Analysis (`sicklesight_merged.py`)
-
-Runs both Pipeline 1 and Pipeline 2 in a single pass — more efficient than running them sequentially.
-
-```bash
-python sicklesight_merged.py \
-    -i video1.mp4,video2.mp4 \
-    -o /path/to/output \
-    [--frame_skip 2] \
-    [--max_time 120] \
-    [--tracking_backend cellpose|low_res]
-```
-
-| Argument | Required | Default | Description |
-|---|---|---|---|
-| `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
-| `-o` / `--output_dir` | Yes | — | Output directory |
-| `--frame_skip` | No | `2` | Process every N-th frame |
-| `--max_time` | No | `120` | Maximum seconds to process per video; shorter videos run fully |
-| `--max_frame` | No | — | Frame-based limit, used only when `--max_time` is not set |
-| `--target_frames` | No | `0` and final processed frame | Comma-separated frame indices for morphology violin plots |
-| `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
-| `--low_res_det_conf` | No | `auto` | YOLO detection confidence for low-resolution mode; accepts `auto` or a number |
-
-**Output files:** all files from Pipeline 1 and Pipeline 2 combined.
-
-Low-resolution example:
-
-```bash
-python sicklesight_merged.py \
-    -i 2156-0%-4.mp4 \
-    -o output_low_res_test \
-    --tracking_backend low_res \
-    --max_time 120
-```
-
----
 
 ## Methods Overview
 
