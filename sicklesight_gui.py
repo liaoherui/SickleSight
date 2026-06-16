@@ -331,22 +331,14 @@ class SickleAnalysisGUI:
         if not self.output_dir:
             messagebox.showwarning("Error", "Output folder not selected.")
             return
-        if (self.tracking_backend_var.get() != "cellpose" and
-                os.path.basename(self.selected_pipeline_var.get()) != "sicklesight_merged.py"):
-            messagebox.showwarning(
-                "Pipeline Option",
-                "Low-resolution segmentation/tracking is currently implemented for sicklesight_merged.py."
-            )
+        try:
+            max_seconds = float(self.max_seconds_var.get())
+        except ValueError:
+            messagebox.showwarning("Error", "Max seconds must be a number.")
             return
-        if os.path.basename(self.selected_pipeline_var.get()) == "sicklesight_merged.py":
-            try:
-                max_seconds = float(self.max_seconds_var.get())
-            except ValueError:
-                messagebox.showwarning("Error", "Max seconds must be a number.")
-                return
-            if max_seconds <= 0:
-                messagebox.showwarning("Error", "Max seconds must be greater than 0.")
-                return
+        if max_seconds <= 0:
+            messagebox.showwarning("Error", "Max seconds must be greater than 0.")
+            return
 
         # 1. RESOLVE SELECTED FILES: Prioritize highlighted Treeview items
         selected_items = self.tree.selection()
@@ -491,8 +483,6 @@ class SickleAnalysisGUI:
         return "\n".join(lines)
 
     def get_pipeline_extra_args(self, script_name):
-        if os.path.basename(script_name) != "sicklesight_merged.py":
-            return ""
         args = [f"--max_time {self.max_seconds_var.get().strip()}"]
         backend = self.tracking_backend_var.get()
         if backend != "cellpose":

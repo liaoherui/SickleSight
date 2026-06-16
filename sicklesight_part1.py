@@ -28,12 +28,23 @@ import argparse
 import os
 import pickle
 import torch.nn.functional as F
+from low_res_backend import (
+    DEFAULT_LOW_RES_SEG_MODEL,
+    DEFAULT_LOW_RES_TRACKER_CONFIG,
+    DEFAULT_LOW_RES_YOLO_MODEL,
+    bbox_morphology,
+    detect_low_res_frame,
+    init_low_res_backend,
+    resolve_low_res_det_conf,
+)
 
 print("DEBUG: IMPORT - 5")
 
 # ------------- Constants ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CELLBOX_MODELS_DIR = os.path.join(SCRIPT_DIR, 'CellBox-Models')
 DEFAULT_OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'output_default')
+DEFAULT_CELLPOSE_MODEL = os.path.join(CELLBOX_MODELS_DIR, 'cyto3_train0327')
 
 # Note (kaiyu): in cv2, color is BGR
 BLUE = (255, 0, 0)
@@ -120,19 +131,19 @@ class SiameseViTChange(nn.Module):
         return logit.reshape(-1)
 
 
-seven_class_model_path = 'best_model_vit_torch_macos_seven.pth'  # Herui's model
+seven_class_model_path = os.path.join(CELLBOX_MODELS_DIR, 'best_model_vit_torch_macos_seven.pth')  # Herui's model
 seven_class_model = ViTClassifier(num_classes=7)
 seven_class_model.load_state_dict(torch.load(seven_class_model_path, map_location=device))
 seven_class_model.to(device)
 seven_class_model.eval()
 
-binary_model_path = 'best_model_vit_torch_macos_raw_vit_large_binary.pth'  # Herui's model
+binary_model_path = os.path.join(CELLBOX_MODELS_DIR, 'best_model_vit_torch_macos_raw_vit_large_binary.pth')  # Herui's model
 binary_model = ViTClassifier(num_classes=2)
 binary_model.load_state_dict(torch.load(binary_model_path, map_location=device))
 binary_model.to(device)
 binary_model.eval()
 
-binary_model_path_D = "direct_vit_D.pt"  # Brandon's model
+binary_model_path_D = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_D.pt")  # Brandon's model
 binary_model_D = ViTClassifier(num_classes=2)
 binary_model_D.load_state_dict(torch.load(binary_model_path_D, map_location=device))
 binary_model_D.to(device)
@@ -144,7 +155,7 @@ binary_model_D.eval()
 # pair_model_C.to(device)
 # pair_model_C.eval()
 
-binary_model_path_E = "direct_vit_E.pt"  # Brandon's model
+binary_model_path_E = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_E.pt")  # Brandon's model
 binary_model_E = ViTClassifier(num_classes=2)
 binary_model_E.load_state_dict(torch.load(binary_model_path_E, map_location=device))
 binary_model_E.to(device)
@@ -157,7 +168,7 @@ binary_model_E.eval()
 # binary_model_G.to(device)
 # binary_model_G.eval()
 
-binary_model_path_Gb = "direct_vit_G.pt"  # Brandon's model
+binary_model_path_Gb = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_G.pt")  # Brandon's model
 binary_model_Gb = ViTClassifier(num_classes=2)
 binary_model_Gb.load_state_dict(torch.load(binary_model_path_Gb, map_location=device))
 binary_model_Gb.to(device)
@@ -169,7 +180,7 @@ binary_model_Gb.eval()
 # pair_model_F.to(device)
 # pair_model_F.eval()
 
-pair_model_path_All = "siamese_vit_All_Haolin.pt"  # Haolin's model
+pair_model_path_All = os.path.join(CELLBOX_MODELS_DIR, "siamese_vit_All_Haolin.pt")  # Haolin's model
 pair_model_All = SiameseViTChange()
 pair_model_All.load_state_dict(torch.load(pair_model_path_All, map_location=device))
 pair_model_All.to(device)
@@ -183,7 +194,7 @@ transform = transforms.Compose([
 ])
 
 # Added by Herui -> For pocked / non-pocked binary classification
-binary_model_path_pock = "best_model_vit_torch_macos_raw_vit_large_binary_pocked.pth"
+binary_model_path_pock = os.path.join(CELLBOX_MODELS_DIR, "best_model_vit_torch_macos_raw_vit_large_binary_pocked.pth")
 binary_model_pock = ViTClassifier(num_classes=2)
 binary_model_pock.load_state_dict(torch.load(binary_model_path_pock, map_location=device))
 binary_model_pock.to(device)
@@ -217,6 +228,18 @@ parser.add_argument('--max_time', type=float, default=None,
                     help='Max duration to process per video in seconds')
 parser.add_argument('--full_video', action='store_true',
                     help='Process each full video')
+parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
+                    help='Segmentation/tracking backend: cellpose or low_res YOLO/BoT-SORT')
+parser.add_argument('--low_res_yolo_model', type=str, default=DEFAULT_LOW_RES_YOLO_MODEL,
+                    help='Path to low-resolution YOLO detection model')
+parser.add_argument('--low_res_seg_model', type=str, default=DEFAULT_LOW_RES_SEG_MODEL,
+                    help='Path to low-resolution YOLO-seg model; accepted for consistency with other pipelines')
+parser.add_argument('--low_res_tracker_config', type=str, default=DEFAULT_LOW_RES_TRACKER_CONFIG,
+                    help='Path to low-resolution BoT-SORT tracker YAML')
+parser.add_argument('--low_res_det_conf', type=str, default='auto',
+                    help='Low-resolution YOLO detection confidence: float or "auto"')
+parser.add_argument('--low_res_iou', type=float, default=0.6,
+                    help='Low-resolution YOLO tracking IOU threshold')
 
 args = parser.parse_args()
 
@@ -728,8 +751,19 @@ def save_intermediate_results(cell_info, df, out_path, f1name="cell_info.pkl", f
 
 # -------------------- Main processing function ---------------------
 def process_video(video_path, out_path, video_id, output_video_path, seven_class_model, binary_model, feature_extractor,
-                  transform, cellpose_model_path='cyto3_train0327', frame_skip=frame_skip, max_frame=max_frame,
-                  fps=fps, max_time_sec=None, full_video=False):
+                  transform, cellpose_model_path=DEFAULT_CELLPOSE_MODEL, frame_skip=frame_skip, max_frame=max_frame,
+                  fps=fps, max_time_sec=None, full_video=False, tracking_backend='cellpose',
+                  low_res_yolo_model_path=DEFAULT_LOW_RES_YOLO_MODEL,
+                  low_res_tracker_config_path=DEFAULT_LOW_RES_TRACKER_CONFIG,
+                  low_res_seg_model_path=DEFAULT_LOW_RES_SEG_MODEL,
+                  low_res_det_conf='auto', low_res_iou=0.6):
+    tracking_backend = tracking_backend.lower()
+    if tracking_backend == 'scdtrack':
+        tracking_backend = 'low_res'
+    if tracking_backend not in {'cellpose', 'low_res'}:
+        raise ValueError(f"Unknown tracking backend: {tracking_backend}")
+    use_low_res = tracking_backend == 'low_res'
+
     # ========= 视频初始化 =========
     print('- Initialization......')
     cap = cv2.VideoCapture(video_path)
@@ -747,15 +781,40 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
     DEBUG_PRINT("Save first frame png")
     cv2.imwrite(out_path + "/first_frame.png", cv2.cvtColor(first_frame, cv2.COLOR_RGB2BGR))
 
+    low_res_state = None
+    low_res_det_conf_value = None
+    if use_low_res:
+        low_res_state = init_low_res_backend(
+            low_res_yolo_model_path,
+            low_res_tracker_config_path,
+            None,
+        )
+        low_res_det_conf_value = resolve_low_res_det_conf(
+            video_path, low_res_state['yolo'], low_res_det_conf)
+
     # Note (kaiyu):
     # We first run through the predictions, and only after all
     # predictions are made, we generate the video, so that we
     # could remove false positives from the binary model's predictions.
 
     # ======= Process Cells =========
-    DEBUG_PRINT("Run segment_frame_downscaled_ds w/ cellpose_model")
-    bboxes, masks_seg, unique_ids, resized_frame = segment_frame_downscaled_ds(first_frame, cellpose_model_path,
-                                                                               out_path, is_frame_0=True)
+    if use_low_res:
+        DEBUG_PRINT("Run low-resolution YOLO/BoT-SORT backend")
+        detections_f0 = detect_low_res_frame(
+            low_res_state, first_frame, 0,
+            det_conf=low_res_det_conf_value,
+            yolo_iou=low_res_iou,
+        )
+        bboxes = {det['track_id']: det['bbox'] for det in detections_f0}
+        crops_f0 = {det['track_id']: det['crop'] for det in detections_f0}
+        ar_f0 = {det['track_id']: bbox_morphology(det['bbox'][2], det['bbox'][3])[0]
+                 for det in detections_f0}
+        masks_seg = None
+        unique_ids = list(bboxes.keys())
+    else:
+        DEBUG_PRINT("Run segment_frame_downscaled_ds w/ cellpose_model")
+        bboxes, masks_seg, unique_ids, resized_frame = segment_frame_downscaled_ds(first_frame, cellpose_model_path,
+                                                                                   out_path, is_frame_0=True)
 
     # Note (kaiyu): cell_info is a SUPER IMPORTANT data structure; it holds all relevant
     # information output by the models to produce results
@@ -765,9 +824,14 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
     for cid in tqdm(unique_ids, desc='Process cells in frame 0 - progress:'):
         DEBUG_PRINT("Running Six Class Prediction for Cell ID: ", cid)
 
-        mask = (masks_seg == cid).astype(np.uint8)
         x, y, w, h = bboxes[cid][0], bboxes[cid][1], bboxes[cid][2], bboxes[cid][3]
-        cell_crop = first_frame[y:y + h, x:x + w]
+        if use_low_res:
+            cell_crop = crops_f0[cid]
+            ar_for_threshold = ar_f0.get(cid, bbox_morphology(w, h)[0])
+        else:
+            mask = (masks_seg == cid).astype(np.uint8)
+            cell_crop = first_frame[y:y + h, x:x + w]
+            ar_for_threshold = aspect_ratio(mask)
         cell_pil = Image.fromarray(cell_crop)
         cell_tensor = transform(cell_pil).unsqueeze(0)
 
@@ -785,7 +849,7 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
 
             # Apply aspect ratio threshold of 1.5 for binary classification of A/G Jianlu 09182025
             if cls_id == CLS_ID['A'] or cls_id == CLS_ID['G']:
-                if aspect_ratio(mask) >= 1.6:
+                if ar_for_threshold >= 1.6:
                     cls_id = CLS_ID['G']
                 else:
                     cls_id = CLS_ID['A']
@@ -856,16 +920,25 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
         if frame_idx % frame_skip != 0:
             continue
 
-        DEBUG_PRINT(f"[frame {frame_idx}] Run segment_frame_downscaled_ds w/ cellpose_model")
-        # if frame_idx<95: continue
-
-        bboxes, masks, unique_ids, resized_frame = segment_frame_downscaled_ds(frame, cellpose_model_path, out_path,
-                                                                               ratio=0.1, diameter=30)
-        # continue
-        # exit()
-        # print(masks)
-
-        matched, used_cids = match_cells_tracking(cell_info, masks, bboxes)
+        if use_low_res:
+            detections = detect_low_res_frame(
+                low_res_state, frame, frame_idx,
+                det_conf=low_res_det_conf_value,
+                yolo_iou=low_res_iou,
+            )
+            matched = {
+                det['track_id']: {
+                    'bbox': det['bbox'],
+                    'class': cell_info[det['track_id']]['class'],
+                }
+                for det in detections
+                if det['track_id'] in cell_info
+            }
+        else:
+            DEBUG_PRINT(f"[frame {frame_idx}] Run segment_frame_downscaled_ds w/ cellpose_model")
+            bboxes, masks, unique_ids, resized_frame = segment_frame_downscaled_ds(frame, cellpose_model_path, out_path,
+                                                                                   ratio=0.1, diameter=30)
+            matched, used_cids = match_cells_tracking(cell_info, masks, bboxes)
 
         for cid, info in matched.items():
             x, y, w, h = info['bbox']
@@ -1266,7 +1339,13 @@ for idx, video_path in enumerate(video_paths):
                                                                               frame_skip=frame_skip,
                                                                               max_frame=max_frame, fps=fps,
                                                                               max_time_sec=max_time,
-                                                                              full_video=full_video)
+                                                                              full_video=full_video,
+                                                                              tracking_backend=args.tracking_backend,
+                                                                              low_res_yolo_model_path=args.low_res_yolo_model,
+                                                                              low_res_tracker_config_path=args.low_res_tracker_config,
+                                                                              low_res_seg_model_path=args.low_res_seg_model,
+                                                                              low_res_det_conf=args.low_res_det_conf,
+                                                                              low_res_iou=args.low_res_iou)
 
     all_stats.append(df)
     all_class_counts.update(class_count)

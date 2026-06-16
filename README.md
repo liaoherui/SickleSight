@@ -133,7 +133,12 @@ Useful time options:
 | `--max_time 480` | Process the first 480 seconds |
 | `--full_video` | Process the complete video |
 
-Pipeline 1 and Pipeline 2 use the standard Cellpose backend. For low-resolution videos, use Pipeline 3 with `--tracking_backend low_res`.
+All three pipelines support the same segmentation/tracking choices:
+
+| Video type | Option to use |
+|---|---|
+| High-resolution / standard-resolution | No extra option, or `--tracking_backend cellpose` |
+| Low-resolution | `--tracking_backend low_res` |
 
 ---
 
@@ -236,8 +241,10 @@ python sicklesight_part1.py \
 | `--max_time` | No | — | Maximum seconds to process per video |
 | `--full_video` | No | Off | Process the complete video |
 | `--max_frame` | No | `480` | Frame-based limit used when `--max_time` and `--full_video` are not set |
+| `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
+| `--low_res_det_conf` | No | `auto` | YOLO detection confidence for low-resolution mode; accepts `auto` or a number |
 
-First 120 seconds:
+High-resolution, first 120 seconds:
 
 ```bash
 python sicklesight_part1.py \
@@ -245,7 +252,7 @@ python sicklesight_part1.py \
     --max_time 120
 ```
 
-First 480 seconds:
+High-resolution, first 480 seconds:
 
 ```bash
 python sicklesight_part1.py \
@@ -253,11 +260,38 @@ python sicklesight_part1.py \
     --max_time 480
 ```
 
-Complete video:
+High-resolution, complete video:
 
 ```bash
 python sicklesight_part1.py \
     -i video1.mp4 \
+    --full_video
+```
+
+Low-resolution, first 120 seconds:
+
+```bash
+python sicklesight_part1.py \
+    -i low_resolution_video.mp4 \
+    --tracking_backend low_res \
+    --max_time 120
+```
+
+Low-resolution, first 480 seconds:
+
+```bash
+python sicklesight_part1.py \
+    -i low_resolution_video.mp4 \
+    --tracking_backend low_res \
+    --max_time 480
+```
+
+Low-resolution, complete video:
+
+```bash
+python sicklesight_part1.py \
+    -i low_resolution_video.mp4 \
+    --tracking_backend low_res \
     --full_video
 ```
 
@@ -295,8 +329,10 @@ python sicklesight_part2.py \
 | `--max_time` | No | — | Analyze frame 0 and the frame at this many seconds |
 | `--full_video` | No | Off | Analyze frame 0 and the final frame |
 | `--target_frames` | No | `0` and frame `480` if available | Comma-separated frame indices for custom morphology analysis |
+| `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
+| `--low_res_det_conf` | No | `auto` | YOLO detection confidence for low-resolution mode; accepts `auto` or a number |
 
-First 120 seconds:
+High-resolution, first 120 seconds:
 
 ```bash
 python sicklesight_part2.py \
@@ -304,7 +340,7 @@ python sicklesight_part2.py \
     --max_time 120
 ```
 
-First 480 seconds:
+High-resolution, first 480 seconds:
 
 ```bash
 python sicklesight_part2.py \
@@ -312,11 +348,38 @@ python sicklesight_part2.py \
     --max_time 480
 ```
 
-Complete video:
+High-resolution, complete video:
 
 ```bash
 python sicklesight_part2.py \
     -i video1.mp4 \
+    --full_video
+```
+
+Low-resolution, first 120 seconds:
+
+```bash
+python sicklesight_part2.py \
+    -i low_resolution_video.mp4 \
+    --tracking_backend low_res \
+    --max_time 120
+```
+
+Low-resolution, first 480 seconds:
+
+```bash
+python sicklesight_part2.py \
+    -i low_resolution_video.mp4 \
+    --tracking_backend low_res \
+    --max_time 480
+```
+
+Low-resolution, complete video:
+
+```bash
+python sicklesight_part2.py \
+    -i low_resolution_video.mp4 \
+    --tracking_backend low_res \
     --full_video
 ```
 
@@ -358,13 +421,15 @@ For low-resolution videos, use `--tracking_backend low_res`. This backend uses Y
 A fine-tuned **Vision Transformer (ViT-Base, patch 16×16)** classifies each cell at frame 0 into one of 7 morphological classes (A–G), reflecting shape severity from normal biconcave disc (A) to fully sickled forms (G).
 
 ### Temporal State Tracking
-A **Siamese ViT network** compares each cell's appearance at frame 0 (reference) to the current frame to detect state transitions (non-sickled → sickled). Cell identity is maintained across frames using a combination of:
+A **Siamese ViT network** compares each cell's appearance at frame 0 (reference) to the current frame to detect state transitions (non-sickled → sickled). With the default Cellpose backend, cell identity is maintained across frames using a combination of:
 
 - **Optical flow** (Lucas–Kanade) for bounding-box prediction
 - **Intersection-over-Union (IoU)** matching
 - **Size and position consistency** checks
 
 Predictions are smoothed with an **Exponential Moving Average (EMA)** filter and confirmed by a minimum-persistence streak counter to reduce false transitions.
+
+With `--tracking_backend low_res`, cell identity is provided by YOLO/BoT-SORT instead; the same Siamese state detection and downstream reporting are then applied.
 
 ### Morphological Metrics
 

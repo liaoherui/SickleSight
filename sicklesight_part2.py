@@ -23,12 +23,24 @@ print("DEBUG: IMPORT - 4")
 from collections import Counter
 from skimage.measure import label, regionprops
 import argparse
+from low_res_backend import (
+    DEFAULT_LOW_RES_SEG_MODEL,
+    DEFAULT_LOW_RES_TRACKER_CONFIG,
+    DEFAULT_LOW_RES_YOLO_MODEL,
+    bbox_morphology,
+    compute_low_res_mask_morphology,
+    detect_low_res_frame,
+    init_low_res_backend,
+    resolve_low_res_det_conf,
+)
 
 print("DEBUG: IMPORT - 5")
 
 # ------------- Constants ----------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CELLBOX_MODELS_DIR = os.path.join(SCRIPT_DIR, 'CellBox-Models')
 DEFAULT_OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'output_default')
+DEFAULT_CELLPOSE_MODEL = os.path.join(CELLBOX_MODELS_DIR, 'cyto3_train0327')
 
 DNAME = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G'}
 CLS_ID = {v: k for k, v in DNAME.items()}
@@ -141,42 +153,42 @@ class SiameseViTChange(nn.Module):
 print("Loading models...")
 
 # 7-class model (Herui's)
-seven_class_model_path = 'best_model_vit_torch_macos_seven.pth'
+seven_class_model_path = os.path.join(CELLBOX_MODELS_DIR, 'best_model_vit_torch_macos_seven.pth')
 seven_class_model = ViTClassifier(num_classes=7)
 seven_class_model.load_state_dict(torch.load(seven_class_model_path, map_location=device))
 seven_class_model.to(device)
 seven_class_model.eval()
 
 # Binary model for general sickle classification (Herui's)
-binary_model_path = 'best_model_vit_torch_macos_raw_vit_large_binary.pth'
+binary_model_path = os.path.join(CELLBOX_MODELS_DIR, 'best_model_vit_torch_macos_raw_vit_large_binary.pth')
 binary_model = ViTClassifier(num_classes=2)
 binary_model.load_state_dict(torch.load(binary_model_path, map_location=device))
 binary_model.to(device)
 binary_model.eval()
 
 # Binary model for class D (Brandon's)
-binary_model_path_D = "direct_vit_D.pt"
+binary_model_path_D = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_D.pt")
 binary_model_D = ViTClassifier(num_classes=2)
 binary_model_D.load_state_dict(torch.load(binary_model_path_D, map_location=device))
 binary_model_D.to(device)
 binary_model_D.eval()
 
 # Binary model for class E (Brandon's)
-binary_model_path_E = "direct_vit_E.pt"
+binary_model_path_E = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_E.pt")
 binary_model_E = ViTClassifier(num_classes=2)
 binary_model_E.load_state_dict(torch.load(binary_model_path_E, map_location=device))
 binary_model_E.to(device)
 binary_model_E.eval()
 
 # Binary model for class G (Brandon's)
-binary_model_path_Gb = "direct_vit_G.pt"
+binary_model_path_Gb = os.path.join(CELLBOX_MODELS_DIR, "direct_vit_G.pt")
 binary_model_Gb = ViTClassifier(num_classes=2)
 binary_model_Gb.load_state_dict(torch.load(binary_model_path_Gb, map_location=device))
 binary_model_Gb.to(device)
 binary_model_Gb.eval()
 
 # Siamese model for change detection (Haolin's) - used for frames > 0
-pair_model_path_All = "siamese_vit_All_Haolin.pt"
+pair_model_path_All = os.path.join(CELLBOX_MODELS_DIR, "siamese_vit_All_Haolin.pt")
 pair_model_All = SiameseViTChange()
 pair_model_All.load_state_dict(torch.load(pair_model_path_All, map_location=device))
 pair_model_All.to(device)
@@ -1208,7 +1220,7 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
             mean_ar_s = 0.0
             mean_ecc_s = 0.0
             mean_circ_s = 0.0
-            
+
             mean_ar_ns = frame_df[frame_df['Sickle_Label'] == 1]['Aspect_Ratio'].mean() if n_nonsickle > 0 else np.nan
             mean_ecc_ns = frame_df[frame_df['Sickle_Label'] == 1]['Eccentricity'].mean() if n_nonsickle > 0 else np.nan
             mean_circ_ns = frame_df[frame_df['Sickle_Label'] == 1]['Circularity'].mean() if n_nonsickle > 0 else np.nan
@@ -1310,7 +1322,13 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
 # -------------------- Processing Functions ---------------------
 
 def process_video_multiframe(video_path, out_path, transform, target_frames,
-                             cellpose_model_path='cyto3_train0327'):
+                             cellpose_model_path=DEFAULT_CELLPOSE_MODEL,
+                             tracking_backend='cellpose',
+                             low_res_yolo_model_path=DEFAULT_LOW_RES_YOLO_MODEL,
+                             low_res_tracker_config_path=DEFAULT_LOW_RES_TRACKER_CONFIG,
+                             low_res_seg_model_path=DEFAULT_LOW_RES_SEG_MODEL,
+                             low_res_det_conf='auto',
+                             low_res_iou=0.6):
     """
     处理视频的多个指定帧
     逻辑与原始脚本完全一致：
@@ -1320,6 +1338,13 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
     """
     print(f'Processing video: {video_path}')
     print(f'Target frames: {target_frames}')
+
+    tracking_backend = tracking_backend.lower()
+    if tracking_backend == 'scdtrack':
+        tracking_backend = 'low_res'
+    if tracking_backend not in {'cellpose', 'low_res'}:
+        raise ValueError(f"Unknown tracking backend: {tracking_backend}")
+    use_low_res = tracking_backend == 'low_res'
 
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -1366,24 +1391,58 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
         cv2.imwrite(out_path + "/frame_0.png", first_frame)
 
     # 分割Frame 0
-    bboxes_f0, masks_seg_f0, unique_ids_f0, _ = segment_frame_downscaled_ds(
-        first_frame_rgb, cellpose_model_path, out_path,
-        save_mask=(0 in save_image_frames), frame_idx=0
-    )
+    low_res_state = None
+    low_res_det_conf_value = None
+    if use_low_res:
+        low_res_state = init_low_res_backend(
+            low_res_yolo_model_path,
+            low_res_tracker_config_path,
+            low_res_seg_model_path,
+        )
+        low_res_det_conf_value = resolve_low_res_det_conf(
+            video_path, low_res_state['yolo'], low_res_det_conf)
+        detections_f0 = detect_low_res_frame(
+            low_res_state, first_frame, 0,
+            det_conf=low_res_det_conf_value,
+            yolo_iou=low_res_iou,
+        )
+        bboxes_f0 = {det['track_id']: det['bbox'] for det in detections_f0}
+        crops_f0 = {
+            det['track_id']: first_frame_rgb[
+                det['bbox'][1]:det['bbox'][1] + det['bbox'][3],
+                det['bbox'][0]:det['bbox'][0] + det['bbox'][2]
+            ]
+            for det in detections_f0
+        }
+        morph_f0 = {
+            det['track_id']: compute_low_res_mask_morphology(
+                det['crop'], low_res_state['seg_model'])
+            for det in detections_f0
+        }
+        unique_ids_f0 = list(bboxes_f0.keys())
+        masks_seg_f0 = None
+    else:
+        bboxes_f0, masks_seg_f0, unique_ids_f0, _ = segment_frame_downscaled_ds(
+            first_frame_rgb, cellpose_model_path, out_path,
+            save_mask=(0 in save_image_frames), frame_idx=0
+        )
 
     frame0_records = []
 
     for cid in tqdm(unique_ids_f0, desc='  Frame 0 Cells'):
-        mask = (masks_seg_f0 == cid).astype(np.uint8)
-        ar_val = aspect_ratio(mask)
-        ecc_val = eccentricity(mask)
-        circ_val = circularity(mask)  # 需求4: 增加circularity
-
         if cid not in bboxes_f0:
             continue
 
         x, y, w, h = bboxes_f0[cid][0], bboxes_f0[cid][1], bboxes_f0[cid][2], bboxes_f0[cid][3]
-        cell_crop = first_frame_rgb[y:y + h, x:x + w]
+        if use_low_res:
+            cell_crop = crops_f0[cid]
+            ar_val, ecc_val, circ_val = morph_f0.get(cid, bbox_morphology(w, h))
+        else:
+            mask = (masks_seg_f0 == cid).astype(np.uint8)
+            ar_val = aspect_ratio(mask)
+            ecc_val = eccentricity(mask)
+            circ_val = circularity(mask)  # 需求4: 增加circularity
+            cell_crop = first_frame_rgb[y:y + h, x:x + w]
 
         if cell_crop.size == 0:
             continue
@@ -1480,14 +1539,34 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
         if is_target_frame:
             cv2.imwrite(out_path + f"/frame_{frame_idx}.png", frame)
 
-        # 分割当前帧
-        bboxes, masks, unique_ids, _ = segment_frame_downscaled_ds(
-            frame_rgb, cellpose_model_path, out_path,
-            ratio=0.1, diameter=30, save_mask=False, frame_idx=frame_idx
-        )
+        if use_low_res:
+            detections = detect_low_res_frame(
+                low_res_state, frame, frame_idx,
+                det_conf=low_res_det_conf_value,
+                yolo_iou=low_res_iou,
+            )
+            morph_by_id = {
+                det['track_id']: compute_low_res_mask_morphology(
+                    det['crop'], low_res_state['seg_model'])
+                for det in detections
+            }
+            matched = {
+                det['track_id']: {
+                    'bbox': det['bbox'],
+                    'class': cell_info[det['track_id']]['class'],
+                }
+                for det in detections
+                if det['track_id'] in cell_info
+            }
+        else:
+            # 分割当前帧
+            bboxes, masks, unique_ids, _ = segment_frame_downscaled_ds(
+                frame_rgb, cellpose_model_path, out_path,
+                ratio=0.1, diameter=30, save_mask=False, frame_idx=frame_idx
+            )
 
-        # 匹配追踪细胞
-        matched, used_cids = match_cells_tracking(cell_info, masks, bboxes)
+            # 匹配追踪细胞
+            matched, used_cids = match_cells_tracking(cell_info, masks, bboxes)
 
         frame_records = []
 
@@ -1533,26 +1612,27 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
             #if is_target_frame:
             is_dense_frame = (frame_idx % 2 == 0)
             if is_target_frame or is_dense_frame:
-                # 计算当前帧的AR和ECC
-                ar_val = 0.0
-                ecc_val = 0.0
-                circ_val = 0.0  # ← 移到这里初始化
-                
-                for mask_cid in unique_ids:
-                    if mask_cid in bboxes:
-                        mx, my, mw, mh = bboxes[mask_cid]
-                        if abs(mx - x) < 50 and abs(my - y) < 50:
-                            mask = (masks == mask_cid).astype(np.uint8)
-                            ar_val = aspect_ratio(mask)
-                            ecc_val = eccentricity(mask)
-                            circ_val = circularity(mask)  # ← 加这行！
-                            break
+                if use_low_res:
+                    ar_val, ecc_val, circ_val = morph_by_id.get(cid, bbox_morphology(w, h))
+                else:
+                    # 计算当前帧的AR和ECC
+                    ar_val = 0.0
+                    ecc_val = 0.0
+                    circ_val = 0.0
 
-                # 如果没找到匹配的mask，使用bbox估算
-                if ar_val == 0.0:
-                    ar_val = max(w, h) / min(w, h) if min(w, h) > 0 else 1.0
-                    ecc_val = 0.5
-                    circ_val = 0.5
+                    for mask_cid in unique_ids:
+                        if mask_cid in bboxes:
+                            mx, my, mw, mh = bboxes[mask_cid]
+                            if abs(mx - x) < 50 and abs(my - y) < 50:
+                                mask = (masks == mask_cid).astype(np.uint8)
+                                ar_val = aspect_ratio(mask)
+                                ecc_val = eccentricity(mask)
+                                circ_val = circularity(mask)
+                                break
+
+                    # 如果没找到匹配的mask，使用bbox估算
+                    if ar_val == 0.0:
+                        ar_val, ecc_val, circ_val = bbox_morphology(w, h)
 
                 cell_info[cid]['aspect_ratio'][frame_idx] = ar_val
                 cell_info[cid]['eccentricity'][frame_idx] = ecc_val
@@ -1676,6 +1756,18 @@ parser.add_argument('--max_time', type=float, default=None,
                     help='Analyze frame 0 and the frame at this many seconds')
 parser.add_argument('--full_video', action='store_true',
                     help='Analyze frame 0 and the final frame of each video')
+parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
+                    help='Segmentation/tracking backend: cellpose or low_res YOLO/BoT-SORT')
+parser.add_argument('--low_res_yolo_model', type=str, default=DEFAULT_LOW_RES_YOLO_MODEL,
+                    help='Path to low-resolution YOLO detection model')
+parser.add_argument('--low_res_seg_model', type=str, default=DEFAULT_LOW_RES_SEG_MODEL,
+                    help='Path to low-resolution YOLO-seg model for mask-based morphology')
+parser.add_argument('--low_res_tracker_config', type=str, default=DEFAULT_LOW_RES_TRACKER_CONFIG,
+                    help='Path to low-resolution BoT-SORT tracker YAML')
+parser.add_argument('--low_res_det_conf', type=str, default='auto',
+                    help='Low-resolution YOLO detection confidence: float or "auto"')
+parser.add_argument('--low_res_iou', type=float, default=0.6,
+                    help='Low-resolution YOLO tracking IOU threshold')
 parser.add_argument('--frame_skip', type=int, default=2,
                     help='(Legacy parameter, not used in multi-frame mode)')
 parser.add_argument('--max_frame', type=int, default=480,
@@ -1721,7 +1813,13 @@ for idx, video_path in enumerate(video_paths):
         video_path=video_path,
         out_path=out_path[idx],
         transform=transform,
-        target_frames=per_video_target_frames
+        target_frames=per_video_target_frames,
+        tracking_backend=args.tracking_backend,
+        low_res_yolo_model_path=args.low_res_yolo_model,
+        low_res_tracker_config_path=args.low_res_tracker_config,
+        low_res_seg_model_path=args.low_res_seg_model,
+        low_res_det_conf=args.low_res_det_conf,
+        low_res_iou=args.low_res_iou
     )
 
     if not video_df.empty:
