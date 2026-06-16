@@ -123,8 +123,17 @@ python sicklesight_gui.py
 
 ### Option B — Command Line
 
-All three analysis scripts accept the same core arguments and can be used independently from the terminal without the GUI.
+All three analysis scripts can be used directly from the terminal.
 
+Useful time options:
+
+| Option | Meaning |
+|---|---|
+| `--max_time 120` | Process the first 120 seconds |
+| `--max_time 480` | Process the first 480 seconds |
+| `--full_video` | Process the complete video |
+
+Pipeline 1 and Pipeline 2 use the standard Cellpose backend. For low-resolution videos, use Pipeline 3 with `--tracking_backend low_res`.
 
 ---
 
@@ -135,34 +144,79 @@ Runs both Pipeline 1 (see below) and Pipeline 2 (see below) in a single pass —
 ```bash
 python sicklesight_merged.py \
     -i video1.mp4,video2.mp4 \
-    -o /path/to/output \
     [--frame_skip 2] \
     [--max_time 120] \
+    [--full_video] \
+    [-o /path/to/output] \
     [--tracking_backend cellpose|low_res]
 ```
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
 | `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
-| `-o` / `--output_dir` | Yes | — | Output directory |
+| `-o` / `--output_dir` | No | `output_default/` | Output directory |
 | `--frame_skip` | No | `2` | Process every N-th frame |
 | `--max_time` | No | `120` | Maximum seconds to process per video; shorter videos run fully |
+| `--full_video` | No | Off | Process the complete video |
 | `--max_frame` | No | — | Frame-based limit, used only when `--max_time` is not set |
 | `--target_frames` | No | `0` and final processed frame | Comma-separated frame indices for morphology violin plots |
 | `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
 | `--low_res_det_conf` | No | `auto` | YOLO detection confidence for low-resolution mode; accepts `auto` or a number |
 
-**Output files:** all files from Pipeline 1 and Pipeline 2 combined.
+If optional arguments are not provided, command-line Pipeline 3 uses the same defaults as the GUI: Cellpose backend, 120 seconds, target frames at 0 and the final processed frame, and `output_default/`.
 
-Low-resolution example:
+High-resolution, first 120 seconds:
 
 ```bash
 python sicklesight_merged.py \
-    -i 2156-0%-4.mp4 \
-    -o output_low_res_test \
+    -i high_resolution_video.mp4 \
+    --max_time 120
+```
+
+High-resolution, first 480 seconds:
+
+```bash
+python sicklesight_merged.py \
+    -i high_resolution_video.mp4 \
+    --max_time 480
+```
+
+High-resolution, complete video:
+
+```bash
+python sicklesight_merged.py \
+    -i high_resolution_video.mp4 \
+    --full_video
+```
+
+Low-resolution, first 120 seconds:
+
+```bash
+python sicklesight_merged.py \
+    -i low_resolution_video.mp4 \
     --tracking_backend low_res \
     --max_time 120
 ```
+
+Low-resolution, first 480 seconds:
+
+```bash
+python sicklesight_merged.py \
+    -i low_resolution_video.mp4 \
+    --tracking_backend low_res \
+    --max_time 480
+```
+
+Low-resolution, complete video:
+
+```bash
+python sicklesight_merged.py \
+    -i low_resolution_video.mp4 \
+    --tracking_backend low_res \
+    --full_video
+```
+
+**Output files:** all files from Pipeline 1 and Pipeline 2 combined.
 
 ---
 
@@ -173,17 +227,44 @@ Tracks the sickled/non-sickled state of each cell across all frames and produces
 ```bash
 python sicklesight_part1.py \
     -i video1.mp4,video2.mp4 \
-    -o /path/to/output \
+    [-o /path/to/output] \
     [--frame_skip 2] \
-    [--max_frame 480]
+    [--max_time 120] \
+    [--full_video]
 ```
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
 | `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
-| `-o` / `--output_dir` | Yes | — | Output directory (created if it does not exist) |
+| `-o` / `--output_dir` | No | `output_default/` | Output directory |
 | `--frame_skip` | No | `2` | Process every N-th frame (higher = faster, lower temporal resolution) |
-| `--max_frame` | No | `480` | Maximum number of frames to process per video |
+| `--max_time` | No | — | Maximum seconds to process per video |
+| `--full_video` | No | Off | Process the complete video |
+| `--max_frame` | No | `480` | Frame-based limit used when `--max_time` and `--full_video` are not set |
+
+First 120 seconds:
+
+```bash
+python sicklesight_part1.py \
+    -i video1.mp4 \
+    --max_time 120
+```
+
+First 480 seconds:
+
+```bash
+python sicklesight_part1.py \
+    -i video1.mp4 \
+    --max_time 480
+```
+
+Complete video:
+
+```bash
+python sicklesight_part1.py \
+    -i video1.mp4 \
+    --full_video
+```
 
 **Output files** (written to `<output_dir>/<video_name>/`):
 
@@ -208,15 +289,50 @@ Measures aspect ratio, eccentricity, and circularity at specified frames and gen
 ```bash
 python sicklesight_part2.py \
     -i video1.mp4,video2.mp4 \
-    -o /path/to/output \
-    [--target_frames 0,480]
+    [-o /path/to/output] \
+    [--max_time 120] \
+    [--full_video]
 ```
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
 | `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
-| `-o` / `--output_dir` | Yes | — | Output directory |
-| `--target_frames` | No | `0,480` | Comma-separated frame indices at which to run morphology analysis |
+| `-o` / `--output_dir` | No | `output_default/` | Output directory |
+| `--max_time` | No | — | Analyze frame 0 and the frame at this many seconds |
+| `--full_video` | No | Off | Analyze frame 0 and the final frame |
+| `--target_frames` | No | `0` and frame `480` if available | Comma-separated frame indices for custom morphology analysis |
+
+First 120 seconds:
+
+```bash
+python sicklesight_part2.py \
+    -i video1.mp4 \
+    --max_time 120
+```
+
+First 480 seconds:
+
+```bash
+python sicklesight_part2.py \
+    -i video1.mp4 \
+    --max_time 480
+```
+
+Complete video:
+
+```bash
+python sicklesight_part2.py \
+    -i video1.mp4 \
+    --full_video
+```
+
+Custom frame indices:
+
+```bash
+python sicklesight_part2.py \
+    -i video1.mp4 \
+    --target_frames 0,480
+```
 
 **Output files** (written to `<output_dir>/<video_name>/`):
 

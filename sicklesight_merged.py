@@ -1951,14 +1951,17 @@ parser = argparse.ArgumentParser(
     description='Combined sickle-cell pipeline: state-ratio + morphology (AR/ECC/Circularity).')
 parser.add_argument('-i', '--inputs', type=str, required=True,
                     help='Comma-separated input video files, e.g. v1.mov,v2.mov')
-parser.add_argument('-o', '--output_dir', type=str, required=True,
-                    help='Output directory')
+parser.add_argument('-o', '--output_dir', type=str,
+                    default=os.path.join(SCRIPT_DIR, 'output_default'),
+                    help='Output directory (default: output_default beside this script)')
 parser.add_argument('--frame_skip', type=int, default=2,
                     help='Process every Nth frame (default: 2)')
 parser.add_argument('--max_time', type=float, default=None,
                     help='Max duration to process per video in seconds (default: 120; shorter videos run fully)')
 parser.add_argument('--max_frame', type=int, default=None,
                     help='Max frame index to process; used only when --max_time is not set')
+parser.add_argument('--full_video', action='store_true',
+                    help='Process each full video')
 parser.add_argument('--target_frames', type=str, default=None,
                     help='Comma-separated frame indices for morphology violin plots (default: 0 and final processed frame)')
 parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
@@ -1981,7 +1984,10 @@ all_out       = args.output_dir
 frame_skip    = args.frame_skip
 max_time_sec  = args.max_time
 max_frame     = args.max_frame if args.max_frame is not None else 480
-if max_time_sec is None and args.max_frame is None:
+if args.full_video:
+    max_time_sec = None
+    max_frame = 10**12
+elif max_time_sec is None and args.max_frame is None:
     max_time_sec = 120.0
 target_frames = None
 if args.target_frames:

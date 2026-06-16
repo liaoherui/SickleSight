@@ -27,6 +27,9 @@ import argparse
 print("DEBUG: IMPORT - 5")
 
 # ------------- Constants ----------------
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'output_default')
+
 DNAME = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G'}
 CLS_ID = {v: k for k, v in DNAME.items()}
 
@@ -1335,8 +1338,8 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
     max_target_frame = max(valid_target_frames)
     target_frames_set = set(valid_target_frames)
 
-    # 需求1: 定义需要保存图像的帧
-    save_image_frames = {0,480}
+    # Save image/mask outputs for the actual requested frames.
+    save_image_frames = set(valid_target_frames)
 
     all_frames_df = pd.DataFrame()
     cell_info = {}  # 存储细胞信息和ref_tensor
@@ -1665,10 +1668,14 @@ print("-------------------- Parameterization --------------------")
 parser = argparse.ArgumentParser(description='Multi-frame Sickle Cell AR & Eccentricity Analysis.')
 parser.add_argument('-i', '--inputs', type=str, required=True,
                     help='Comma-separated list of input video files')
-parser.add_argument('-o', '--output_dir', type=str, required=True,
-                    help='Output directory')
-parser.add_argument('--target_frames', type=str, default='0,480',
-                    help='Comma-separated list of frame indices to analyze (default: 0,480)')
+parser.add_argument('-o', '--output_dir', type=str, default=DEFAULT_OUTPUT_DIR,
+                    help='Output directory (default: output_default beside this script)')
+parser.add_argument('--target_frames', type=str, default=None,
+                    help='Comma-separated list of frame indices to analyze')
+parser.add_argument('--max_time', type=float, default=None,
+                    help='Analyze frame 0 and the frame at this many seconds')
+parser.add_argument('--full_video', action='store_true',
+                    help='Analyze frame 0 and the final frame of each video')
 parser.add_argument('--frame_skip', type=int, default=2,
                     help='(Legacy parameter, not used in multi-frame mode)')
 parser.add_argument('--max_frame', type=int, default=480,
@@ -1676,9 +1683,10 @@ parser.add_argument('--max_frame', type=int, default=480,
 
 args = parser.parse_args()
 
-# 解析目标帧
-target_frames = [int(f.strip()) for f in args.target_frames.split(',')]
-print(f"Target frames to analyze: {target_frames}")
+target_frames = None
+if args.target_frames:
+    target_frames = [int(f.strip()) for f in args.target_frames.split(',') if f.strip()]
+print(f"Target frames to analyze: {target_frames if target_frames is not None else '0 + selected final frame'}")
 
 video_paths = args.inputs.split(',')
 all_out = args.output_dir
@@ -1689,15 +1697,31 @@ for op in out_path:
     os.makedirs(op, exist_ok=True)
 
 all_videos_df = pd.DataFrame()
+combined_target_frames = set()
 
 for idx, video_path in enumerate(video_paths):
     os.makedirs(out_path[idx], exist_ok=True)
+    per_video_target_frames = target_frames
+    if per_video_target_frames is None:
+        cap_tmp = cv2.VideoCapture(video_path)
+        total_frames_tmp = int(cap_tmp.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps_tmp = cap_tmp.get(cv2.CAP_PROP_FPS) or 4.0
+        cap_tmp.release()
+        final_frame = max(0, total_frames_tmp - 1)
+        if args.full_video:
+            selected_frame = final_frame
+        elif args.max_time is not None:
+            selected_frame = min(int(round(args.max_time * fps_tmp)), final_frame)
+        else:
+            selected_frame = min(480, final_frame)
+        per_video_target_frames = [0, selected_frame]
+    combined_target_frames.update(per_video_target_frames)
 
     video_df = process_video_multiframe(
         video_path=video_path,
         out_path=out_path[idx],
         transform=transform,
-        target_frames=target_frames
+        target_frames=per_video_target_frames
     )
 
     if not video_df.empty:
@@ -1709,6 +1733,13 @@ print("Generating Combined Reports (All Videos)...")
 print("=" * 60)
 
 if not all_videos_df.empty:
+    target_frames_for_combined = sorted(
+        f for f in combined_target_frames
+        if f in set(all_videos_df['Frame_Index'].unique())
+    )
+    if not target_frames_for_combined:
+        target_frames_for_combined = sorted(all_videos_df['Frame_Index'].unique())
+
     all_videos_df.to_csv(all_out + '/combined_all_videos_raw_data.csv', index=False)
 
     # Combined AR Stats
@@ -1722,11 +1753,11 @@ if not all_videos_df.empty:
     # Combined Circularity Stats (需求4)
     stats_comb_circ = calculate_statistics_summary(all_videos_df, ['Frame_Index', 'Sickle_Label'], 'Circularity')
     stats_comb_circ.to_csv(all_out + '/combined_stats_circ.csv', index=False)
-    save_image_frames = {480}
+    save_image_frames = set(target_frames_for_combined)
 
     # ====== 新增: Combined 每帧的 violin 图 ======
     print("\nGenerating combined per-frame violin plots...")
-    for frame_idx in target_frames:
+    for frame_idx in target_frames_for_combined:
         if frame_idx not in save_image_frames:
             continue
         frame_df = all_videos_df[all_videos_df['Frame_Index'] == frame_idx]
@@ -1789,14 +1820,14 @@ if not all_videos_df.empty:
             print(f"  - Generated combined violin plots for frame {frame_idx}")
 
     # Combined Plots (multi-frame comparison)
-    plot_multiframe_comparison_ar(all_videos_df, all_out + '/combined_multiframe_comparison_ar.png', target_frames)
-    plot_multiframe_comparison_ecc(all_videos_df, all_out + '/combined_multiframe_comparison_ecc.png', target_frames)
+    plot_multiframe_comparison_ar(all_videos_df, all_out + '/combined_multiframe_comparison_ar.png', target_frames_for_combined)
+    plot_multiframe_comparison_ecc(all_videos_df, all_out + '/combined_multiframe_comparison_ecc.png', target_frames_for_combined)
 
     plot_multiframe_comparison_circ(all_videos_df, all_out + '/combined_multiframe_comparison_circ.png',
-                                    target_frames)  # 需求4
+                                    target_frames_for_combined)  # 需求4
 
-    trend_stats = plot_multiframe_trend(all_videos_df, all_out + '/combined_multiframe_trend.png', target_frames,
-                                        max(target_frames))
+    trend_stats = plot_multiframe_trend(all_videos_df, all_out + '/combined_multiframe_trend.png', target_frames_for_combined,
+                                        max(target_frames_for_combined))
     if trend_stats is not None:
         trend_stats.to_csv(all_out + '/combined_multiframe_trend_stats.csv', index=False)
 
@@ -1819,6 +1850,6 @@ if not all_videos_df.empty:
     print("    - combined_frameX_violin_7class_ar.png    (新增: 每帧7-class AR小提琴图)")
     print("    - combined_frameX_violin_7class_ecc.png   (新增: 每帧7-class ECC小提琴图)")
     print("    - combined_multiframe_*.png")
-    print(f"\n分析的帧: {target_frames}")
+    print(f"\n分析的帧: {target_frames_for_combined}")
 else:
     print("Warning: No cell data collected from any video.")

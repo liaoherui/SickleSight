@@ -32,6 +32,9 @@ import torch.nn.functional as F
 print("DEBUG: IMPORT - 5")
 
 # ------------- Constants ----------------
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'output_default')
+
 # Note (kaiyu): in cv2, color is BGR
 BLUE = (255, 0, 0)
 RED = (0, 0, 255)
@@ -204,12 +207,16 @@ parser = argparse.ArgumentParser(description='Cell video classifier with filteri
 
 parser.add_argument('-i', '--inputs', type=str, required=True,
                     help='Comma-separated list of input video files, e.g., v1.mov,v2.mov,v3.mov')
-parser.add_argument('-o', '--output_dir', type=str, required=True,
-                    help='Output directory')
+parser.add_argument('-o', '--output_dir', type=str, default=DEFAULT_OUTPUT_DIR,
+                    help='Output directory (default: output_default beside this script)')
 parser.add_argument('--frame_skip', type=int, default=2,
                     help='Process every Nth frame')
 parser.add_argument('--max_frame', type=int, default=480,
                     help='Max number of frames to process')
+parser.add_argument('--max_time', type=float, default=None,
+                    help='Max duration to process per video in seconds')
+parser.add_argument('--full_video', action='store_true',
+                    help='Process each full video')
 
 args = parser.parse_args()
 
@@ -217,6 +224,8 @@ video_paths = args.inputs.split(',')
 all_out = args.output_dir
 frame_skip = args.frame_skip
 max_frame = args.max_frame
+max_time = args.max_time
+full_video = args.full_video
 output = [os.path.splitext(os.path.basename(v))[0] + '.avi' for v in video_paths]
 out_path = [os.path.join(all_out, os.path.splitext(os.path.basename(v))[0]) for v in video_paths]
 fps = 4  # 4 frames - 1 second
@@ -720,7 +729,7 @@ def save_intermediate_results(cell_info, df, out_path, f1name="cell_info.pkl", f
 # -------------------- Main processing function ---------------------
 def process_video(video_path, out_path, video_id, output_video_path, seven_class_model, binary_model, feature_extractor,
                   transform, cellpose_model_path='cyto3_train0327', frame_skip=frame_skip, max_frame=max_frame,
-                  fps=fps):
+                  fps=fps, max_time_sec=None, full_video=False):
     # ========= 视频初始化 =========
     print('- Initialization......')
     cap = cv2.VideoCapture(video_path)
@@ -829,7 +838,13 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
     # frame_idx = 1
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if max_frame > total_frames:
+    if full_video:
+        max_frame = total_frames
+        print(f"  Processing full video: {total_frames} frames")
+    elif max_time_sec is not None:
+        max_frame = min(int(round(max_time_sec * fps)), total_frames)
+        print(f"  Max duration: {max_time_sec:g}s × {fps:.2f}fps -> {max_frame} frames")
+    elif max_frame > total_frames:
         max_frame = total_frames
 
     # ========= 后续帧处理 =========
@@ -1249,7 +1264,9 @@ for idx, video_path in enumerate(video_paths):
                                                                               feature_extractor=feature_extractor,
                                                                               transform=transform,
                                                                               frame_skip=frame_skip,
-                                                                              max_frame=max_frame, fps=fps)
+                                                                              max_frame=max_frame, fps=fps,
+                                                                              max_time_sec=max_time,
+                                                                              full_video=full_video)
 
     all_stats.append(df)
     all_class_counts.update(class_count)
