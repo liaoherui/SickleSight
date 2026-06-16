@@ -115,7 +115,7 @@ python sicklesight_gui.py
 4. Choose **Segmentation / Tracking**:
    - `Cellpose` for standard-resolution videos
    - `Low-resolution YOLO/BoT-SORT` for low-resolution videos
-5. Set **Max seconds** and **Frames/sec**. Defaults are `120` seconds and `4` frames/sec.
+5. Set **Max seconds**. Leave **Frames/sec** blank to use the video's own FPS, or enter a number to override it.
 6. Confirm the **Output Folder**. The default is `output_default/` beside the GUI script.
 7. Click **Generate Script & Run Analysis**.
 
@@ -127,7 +127,9 @@ All three analysis scripts can be used directly from the terminal.
 
 Useful time options:
 
-SickleSight converts `--max_time` to frame number using `--analysis_fps`. The default is `4` frames/sec, so `--max_time 120` processes up to frame `480`, regardless of the video file's metadata FPS. To change this definition, set `--analysis_fps 2`, `--analysis_fps 8`, etc.
+SickleSight converts `--max_time` to a frame number using the video's own FPS by default. For example, a 20 fps video with `--max_time 120` processes up to about frame `2400`.
+
+To force a custom time definition, set `--analysis_fps`. For example, `--analysis_fps 4` means 4 raw frames are treated as 1 second. Annotated output videos and time-based plots use the same FPS setting.
 
 | Option | Meaning |
 |---|---|
@@ -135,7 +137,7 @@ SickleSight converts `--max_time` to frame number using `--analysis_fps`. The de
 | `--max_time 480` | Process the first 480 seconds |
 | `--full_video` | Process the complete video |
 
-Example with a different analysis-time definition:
+Example with a custom time definition:
 
 ```bash
 python sicklesight_merged.py \
@@ -144,7 +146,7 @@ python sicklesight_merged.py \
     --analysis_fps 2
 ```
 
-This processes up to frame `240` because `120 × 2 = 240`.
+This processes up to about frame `240` because `120 × 2 = 240`.
 
 All three pipelines support the same segmentation/tracking choices:
 
@@ -172,7 +174,7 @@ python sicklesight_merged.py \
 | `-o` / `--output_dir` | No | `output_default/` | Output directory |
 | `--frame_skip` | No | `2` | Process every N-th frame |
 | `--max_time` | No | `120` | Maximum seconds to process per video; shorter videos run fully |
-| `--analysis_fps` | No | `4` | Frames per analysis second used to convert `--max_time` to frame number |
+| `--analysis_fps` | No | Auto video FPS | Optional custom FPS used for `--max_time`, plots, and output video playback |
 | `--full_video` | No | Off | Process the complete video |
 | `--max_frame` | No | — | Frame-based limit, used only when `--max_time` is not set |
 | `--target_frames` | No | `0` and final processed frame | Comma-separated frame indices for morphology violin plots |
@@ -253,7 +255,7 @@ python sicklesight_part1.py \
 | `-o` / `--output_dir` | No | `output_default/` | Output directory |
 | `--frame_skip` | No | `2` | Process every N-th frame (higher = faster, lower temporal resolution) |
 | `--max_time` | No | `120` | Maximum seconds to process per video; shorter videos run fully |
-| `--analysis_fps` | No | `4` | Frames per analysis second used to convert `--max_time` to frame number |
+| `--analysis_fps` | No | Auto video FPS | Optional custom FPS used for `--max_time`, plots, and output video playback |
 | `--full_video` | No | Off | Process the complete video |
 | `--max_frame` | No | — | Frame-based limit, used only when `--max_time` is not set |
 | `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
@@ -342,7 +344,7 @@ python sicklesight_part2.py \
 | `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
 | `-o` / `--output_dir` | No | `output_default/` | Output directory |
 | `--max_time` | No | `120` | Analyze frame 0 and the frame at this many seconds |
-| `--analysis_fps` | No | `4` | Frames per analysis second used to convert `--max_time` to frame number |
+| `--analysis_fps` | No | Auto video FPS | Optional custom FPS used for `--max_time` and plot time axes |
 | `--full_video` | No | Off | Analyze frame 0 and the final frame |
 | `--target_frames` | No | `0` and the frame at 120 seconds | Comma-separated frame indices for custom morphology analysis |
 | `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |

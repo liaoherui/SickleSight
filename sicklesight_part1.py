@@ -226,8 +226,8 @@ parser.add_argument('--max_frame', type=int, default=None,
                     help='Max frame index to process; used only when --max_time is not set')
 parser.add_argument('--max_time', type=float, default=None,
                     help='Max analysis seconds (default: 120; shorter videos run fully)')
-parser.add_argument('--analysis_fps', type=float, default=4.0,
-                    help='Analysis frames per second used to convert --max_time to frames (default: 4)')
+parser.add_argument('--analysis_fps', type=float, default=None,
+                    help='Frames per second used for --max_time, plots, and output video playback (default: auto from video)')
 parser.add_argument('--full_video', action='store_true',
                     help='Process each full video')
 parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
@@ -252,7 +252,7 @@ max_frame = args.max_frame
 max_time = args.max_time
 analysis_fps = args.analysis_fps
 full_video = args.full_video
-if analysis_fps <= 0:
+if analysis_fps is not None and analysis_fps <= 0:
     parser.error('--analysis_fps must be greater than 0')
 if full_video:
     max_time = None
@@ -261,6 +261,15 @@ elif max_time is None and max_frame is None:
 output = [os.path.splitext(os.path.basename(v))[0] + '.avi' for v in video_paths]
 out_path = [os.path.join(all_out, os.path.splitext(os.path.basename(v))[0]) for v in video_paths]
 fps = analysis_fps
+
+
+def resolve_time_fps(video_path, override_fps=None, fallback=4.0):
+    if override_fps is not None:
+        return override_fps
+    cap_tmp = cv2.VideoCapture(video_path)
+    video_fps = cap_tmp.get(cv2.CAP_PROP_FPS) or fallback
+    cap_tmp.release()
+    return video_fps
 # print(video_paths,all_out,output,out_path)
 # exit()
 os.makedirs(all_out, exist_ok=True)
@@ -308,11 +317,18 @@ def remove_edge_cells(masks, threshold=0.3):
     return filtered_masks
 
 
+def frame_time_seconds(df, analysis_fps):
+    """Use raw frame numbers for the analysis time axis."""
+    if 'Frame' in df.columns:
+        return df['Frame'] / analysis_fps
+    return df['FrameIndex'] / analysis_fps
+
+
 def plot_total_binary_ratio(df, out_path, frame_skip, fps, title='Total cell ration (binary)'):
     total_pos = df[[f'Class_{i}_pos' for i in range(7)]].sum(axis=1)
     total_count = df[[f'Class_{i}_total' for i in range(7)]].sum(axis=1)
     total_ratio = 1 - total_pos / total_count.replace(0, np.nan)
-    time_sec = df['FrameIndex'] * frame_skip / fps
+    time_sec = frame_time_seconds(df, fps)
     plt.figure(figsize=(8, 5))
     y_percent = total_ratio * 100
     plt.plot(time_sec, y_percent, label='Total sickled fraction', color='black')
@@ -343,7 +359,7 @@ def plot_14_groups_ratio(df, out_path, frame_skip, fps, title='Cell Ratio by Cla
     绘制14个组别的sickling曲线:
     A-pocked, A-np, B-pocked, B-np, ..., G-pocked, G-np
     """
-    time_sec = df['FrameIndex'] * frame_skip / fps
+    time_sec = frame_time_seconds(df, fps)
     plt.figure(figsize=(14, 8))
 
     # 颜色方案: 每个class用一个基础色,pocked用实线,non-pocked用虚线
@@ -776,12 +792,13 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
     # ========= 视频初始化 =========
     print('- Initialization......')
     cap = cv2.VideoCapture(video_path)
-    source_fps = cap.get(cv2.CAP_PROP_FPS) or fps
+    source_fps = cap.get(cv2.CAP_PROP_FPS) or 4.0
+    time_fps = fps if fps is not None else source_fps
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'MJPG')
     print('- Initialization......Done~')
-    output_fps = source_fps / frame_skip
+    output_fps = time_fps / frame_skip
 
     # ========= 第0帧：分割 + 初始分类 =========
     ret, first_frame = cap.read()
@@ -915,8 +932,8 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
         max_frame = total_frames
         print(f"  Processing full video: {total_frames} frames")
     elif max_time_sec is not None:
-        max_frame = min(int(round(max_time_sec * fps)), total_frames)
-        print(f"  Max duration: {max_time_sec:g}s × {fps:.2f} analysis fps -> {max_frame} frames")
+        max_frame = min(int(round(max_time_sec * time_fps)), total_frames)
+        print(f"  Max duration: {max_time_sec:g}s × {time_fps:.2f} fps -> {max_frame} frames")
     elif max_frame is None:
         max_frame = total_frames
     elif max_frame > total_frames:
@@ -1265,7 +1282,7 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
     df_14groups.to_csv(out_path + '/state_ratio_report_14groups.csv', index=False)
 
     # New
-    time_sec = df['FrameIndex'] * frame_skip / fps
+    time_sec = frame_time_seconds(df, time_fps)
     plt.figure(figsize=(10, 6))
     for cls_id in range(num_classes):
         y_percent = df[f'Class_{cls_id}'] * 100
@@ -1284,14 +1301,14 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
     plt.close()
     print("Finished - generate csv and figure report.")
 
-    plot_total_binary_ratio(df, out_path + '/state_ratio_plot_binary.png', frame_skip, fps)
+    plot_total_binary_ratio(df, out_path + '/state_ratio_plot_binary.png', frame_skip, time_fps)
 
     # New for pocked cells
     colors = [
         "#0922e3",  # non-pocked Blue
         "#f05151"  # pocked Red
     ]
-    time_sec = df2['FrameIndex'] * frame_skip / fps
+    time_sec = frame_time_seconds(df2, time_fps)
     plt.figure(figsize=(10, 6))
 
     total_pock_cells = sum(pock_counts.values())
@@ -1316,7 +1333,7 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
     plt.close()
 
     # 新增: 绘制14组别的曲线
-    plot_14_groups_ratio(df_14groups, out_path + '/state_ratio_plot_14groups.png', frame_skip, fps)
+    plot_14_groups_ratio(df_14groups, out_path + '/state_ratio_plot_14groups.png', frame_skip, time_fps)
 
     return cell_info, df, Counter([info['class'] for info in cell_info.values()]), df2, pock_counts, df_14groups  # 新增返回df_14groups
 
@@ -1335,6 +1352,7 @@ all_stats_pock = []
 all_class_counts_pock = Counter()
 
 all_stats_14groups = []  # 新增: 保存所有视频的14组别统计
+combined_time_fps = resolve_time_fps(video_paths[0], fps) if video_paths else 4.0
 
 for idx, video_path in enumerate(video_paths):
     os.makedirs(out_path[idx], exist_ok=True)
@@ -1447,7 +1465,7 @@ for cls_id in range(7):
 final_df_14groups.to_csv(all_out + '/combined_state_ratio_report_14groups.csv', index=False)
 
 # === 画折线图 ===
-time_sec = final_df['FrameIndex'] * frame_skip / fps
+time_sec = frame_time_seconds(final_df, combined_time_fps)
 plt.figure(figsize=(10, 6))
 # jianlu editted colors
 colors = [
@@ -1473,10 +1491,10 @@ plt.tight_layout()
 plt.savefig(all_out + '/combined_state_ratio_plot.png', dpi=300)
 plt.close()
 
-plot_total_binary_ratio(final_df, all_out + '/state_ratio_plot_binary.png', frame_skip, fps)
+plot_total_binary_ratio(final_df, all_out + '/state_ratio_plot_binary.png', frame_skip, combined_time_fps)
 
 # === 画折线图 for pock cells ===
-time_sec = final_df_pock['FrameIndex'] * frame_skip / fps
+time_sec = frame_time_seconds(final_df_pock, combined_time_fps)
 plt.figure(figsize=(10, 6))
 # jianlu editted colors
 colors = [
@@ -1503,7 +1521,7 @@ plt.close()
 
 # 新增: 绘制合并后的14组别曲线
 plot_14_groups_ratio(final_df_14groups, all_out + '/combined_state_ratio_plot_14groups.png',
-                     frame_skip, fps,
+                     frame_skip, combined_time_fps,
                      title='Combined Cell Ratio by Class and Pocked Status (All Videos)')
 
 # === 画合并饼图 ===

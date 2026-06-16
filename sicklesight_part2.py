@@ -1038,9 +1038,23 @@ def plot_7class_nature_style_circ(df, out_path, frame_idx=None):
     plt.close()
 
 
+def prepare_time_axis(df, target_frames):
+    if 'Time_sec' in df.columns:
+        df = df.copy()
+        df['Time_Label'] = df['Time_sec'].map(lambda x: f"{x:g}s")
+        order = [
+            f"{df.loc[df['Frame_Index'] == f, 'Time_sec'].iloc[0]:g}s"
+            for f in target_frames
+            if not df[df['Frame_Index'] == f].empty
+        ]
+        return df, 'Time_Label', order, 'Time (s)'
+    return df, 'Frame_Index', target_frames, 'Frame'
+
+
 def plot_multiframe_comparison_circ(all_frames_df, out_path, target_frames):
     """绘制多帧对比的Circularity图 (需求4)"""
     all_frames_df = all_frames_df[all_frames_df['Frame_Index'].isin(target_frames)]
+    all_frames_df, x_col, order, x_label = prepare_time_axis(all_frames_df, target_frames)
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     # 左图：Non-sickle 跨帧对比 (Label = 1)
@@ -1048,15 +1062,15 @@ def plot_multiframe_comparison_circ(all_frames_df, out_path, target_frames):
     df_ns = all_frames_df[all_frames_df['Sickle_Label'] == 1]  # 1 = Non-sickle
 
     if not df_ns.empty:
-        sns.violinplot(data=df_ns, x='Frame_Index', y='Circularity',
+        sns.violinplot(data=df_ns, x=x_col, y='Circularity', order=order,
                        palette=FRAME_COLORS[:len(target_frames)],
                        inner=None, linewidth=0, alpha=0.4, ax=ax1)
-        sns.boxplot(data=df_ns, x='Frame_Index', y='Circularity', width=0.15,
+        sns.boxplot(data=df_ns, x=x_col, y='Circularity', order=order, width=0.15,
                     boxprops={'facecolor': 'white', 'edgecolor': 'black', 'alpha': 0.9},
                     medianprops={'color': 'black', 'linewidth': 1.5},
                     showfliers=False, ax=ax1)
 
-    ax1.set_xlabel("Frame", fontweight='bold')
+    ax1.set_xlabel(x_label, fontweight='bold')
     ax1.set_ylabel("Circularity", fontweight='bold')
     ax1.set_title("Non-sickle Cells - Circularity Across Frames", fontsize=14, fontweight='bold')
 
@@ -1065,15 +1079,15 @@ def plot_multiframe_comparison_circ(all_frames_df, out_path, target_frames):
     df_s = all_frames_df[all_frames_df['Sickle_Label'] == 0]  # 0 = Sickle
 
     if not df_s.empty:
-        sns.violinplot(data=df_s, x='Frame_Index', y='Circularity',
+        sns.violinplot(data=df_s, x=x_col, y='Circularity', order=order,
                        palette=FRAME_COLORS[:len(target_frames)],
                        inner=None, linewidth=0, alpha=0.4, ax=ax2)
-        sns.boxplot(data=df_s, x='Frame_Index', y='Circularity', width=0.15,
+        sns.boxplot(data=df_s, x=x_col, y='Circularity', order=order, width=0.15,
                     boxprops={'facecolor': 'white', 'edgecolor': 'black', 'alpha': 0.9},
                     medianprops={'color': 'black', 'linewidth': 1.5},
                     showfliers=False, ax=ax2)
 
-    ax2.set_xlabel("Frame", fontweight='bold')
+    ax2.set_xlabel(x_label, fontweight='bold')
     ax2.set_ylabel("Circularity", fontweight='bold')
     ax2.set_title("Sickle Cells - Circularity Across Frames", fontsize=14, fontweight='bold')
 
@@ -1088,6 +1102,7 @@ def plot_multiframe_comparison_circ(all_frames_df, out_path, target_frames):
 def plot_multiframe_comparison_ar(all_frames_df, out_path, target_frames):
     """绘制多帧对比的Aspect Ratio图"""
     all_frames_df = all_frames_df[all_frames_df['Frame_Index'].isin(target_frames)]
+    all_frames_df, x_col, order, x_label = prepare_time_axis(all_frames_df, target_frames)
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     # 左图：Non-sickle 跨帧对比 (Label = 1)
@@ -1095,16 +1110,16 @@ def plot_multiframe_comparison_ar(all_frames_df, out_path, target_frames):
     df_ns = all_frames_df[all_frames_df['Sickle_Label'] == 1]  # 1 = Non-sickle
 
     if not df_ns.empty:
-        sns.violinplot(data=df_ns, x='Frame_Index', y='Aspect_Ratio',
+        sns.violinplot(data=df_ns, x=x_col, y='Aspect_Ratio', order=order,
                        palette=FRAME_COLORS[:len(target_frames)],
                        inner=None, linewidth=0, alpha=0.4, ax=ax1)
-        sns.boxplot(data=df_ns, x='Frame_Index', y='Aspect_Ratio', width=0.15,
+        sns.boxplot(data=df_ns, x=x_col, y='Aspect_Ratio', order=order, width=0.15,
                     boxprops={'facecolor': 'white', 'edgecolor': 'black', 'alpha': 0.9},
                     medianprops={'color': 'black', 'linewidth': 1.5},
                     showfliers=False, ax=ax1)
 
     ax1.axhline(y=1.6, color='red', linestyle='--', linewidth=1.5, alpha=0.7, zorder=0)
-    ax1.set_xlabel("Frame", fontweight='bold')
+    ax1.set_xlabel(x_label, fontweight='bold')
     ax1.set_ylabel("Aspect Ratio", fontweight='bold')
     ax1.set_title("Non-sickle Cells - AR Across Frames", fontsize=14, fontweight='bold')
 
@@ -1113,16 +1128,16 @@ def plot_multiframe_comparison_ar(all_frames_df, out_path, target_frames):
     df_s = all_frames_df[all_frames_df['Sickle_Label'] == 0]  # 0 = Sickle
 
     if not df_s.empty:
-        sns.violinplot(data=df_s, x='Frame_Index', y='Aspect_Ratio',
+        sns.violinplot(data=df_s, x=x_col, y='Aspect_Ratio', order=order,
                        palette=FRAME_COLORS[:len(target_frames)],
                        inner=None, linewidth=0, alpha=0.4, ax=ax2)
-        sns.boxplot(data=df_s, x='Frame_Index', y='Aspect_Ratio', width=0.15,
+        sns.boxplot(data=df_s, x=x_col, y='Aspect_Ratio', order=order, width=0.15,
                     boxprops={'facecolor': 'white', 'edgecolor': 'black', 'alpha': 0.9},
                     medianprops={'color': 'black', 'linewidth': 1.5},
                     showfliers=False, ax=ax2)
 
     ax2.axhline(y=1.6, color='red', linestyle='--', linewidth=1.5, alpha=0.7, zorder=0)
-    ax2.set_xlabel("Frame", fontweight='bold')
+    ax2.set_xlabel(x_label, fontweight='bold')
     ax2.set_ylabel("Aspect Ratio", fontweight='bold')
     ax2.set_title("Sickle Cells - AR Across Frames", fontsize=14, fontweight='bold')
 
@@ -1135,6 +1150,7 @@ def plot_multiframe_comparison_ar(all_frames_df, out_path, target_frames):
 def plot_multiframe_comparison_ecc(all_frames_df, out_path, target_frames):
     """绘制多帧对比的Eccentricity图"""
     all_frames_df = all_frames_df[all_frames_df['Frame_Index'].isin(target_frames)]
+    all_frames_df, x_col, order, x_label = prepare_time_axis(all_frames_df, target_frames)
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
     # 左图：Non-sickle 跨帧对比 (Label = 1)
@@ -1142,15 +1158,15 @@ def plot_multiframe_comparison_ecc(all_frames_df, out_path, target_frames):
     df_ns = all_frames_df[all_frames_df['Sickle_Label'] == 1]  # 1 = Non-sickle
 
     if not df_ns.empty:
-        sns.violinplot(data=df_ns, x='Frame_Index', y='Eccentricity',
+        sns.violinplot(data=df_ns, x=x_col, y='Eccentricity', order=order,
                        palette=FRAME_COLORS[:len(target_frames)],
                        inner=None, linewidth=0, alpha=0.4, ax=ax1)
-        sns.boxplot(data=df_ns, x='Frame_Index', y='Eccentricity', width=0.15,
+        sns.boxplot(data=df_ns, x=x_col, y='Eccentricity', order=order, width=0.15,
                     boxprops={'facecolor': 'white', 'edgecolor': 'black', 'alpha': 0.9},
                     medianprops={'color': 'black', 'linewidth': 1.5},
                     showfliers=False, ax=ax1)
 
-    ax1.set_xlabel("Frame", fontweight='bold')
+    ax1.set_xlabel(x_label, fontweight='bold')
     ax1.set_ylabel("Eccentricity", fontweight='bold')
     ax1.set_title("Non-sickle Cells - Eccentricity Across Frames", fontsize=14, fontweight='bold')
 
@@ -1159,15 +1175,15 @@ def plot_multiframe_comparison_ecc(all_frames_df, out_path, target_frames):
     df_s = all_frames_df[all_frames_df['Sickle_Label'] == 0]  # 0 = Sickle
 
     if not df_s.empty:
-        sns.violinplot(data=df_s, x='Frame_Index', y='Eccentricity',
+        sns.violinplot(data=df_s, x=x_col, y='Eccentricity', order=order,
                        palette=FRAME_COLORS[:len(target_frames)],
                        inner=None, linewidth=0, alpha=0.4, ax=ax2)
-        sns.boxplot(data=df_s, x='Frame_Index', y='Eccentricity', width=0.15,
+        sns.boxplot(data=df_s, x=x_col, y='Eccentricity', order=order, width=0.15,
                     boxprops={'facecolor': 'white', 'edgecolor': 'black', 'alpha': 0.9},
                     medianprops={'color': 'black', 'linewidth': 1.5},
                     showfliers=False, ax=ax2)
 
-    ax2.set_xlabel("Frame", fontweight='bold')
+    ax2.set_xlabel(x_label, fontweight='bold')
     ax2.set_ylabel("Eccentricity", fontweight='bold')
     ax2.set_title("Sickle Cells - Eccentricity Across Frames", fontsize=14, fontweight='bold')
 
@@ -1177,7 +1193,8 @@ def plot_multiframe_comparison_ecc(all_frames_df, out_path, target_frames):
     plt.close()
 
 
-def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_frame):
+def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_frame,
+                          analysis_fps=DEFAULT_ANALYSIS_FPS):
     """绘制Sickle细胞比例随帧变化的趋势图
     需求5: non-sickle只显示第0帧，sickle显示0帧+指定帧+密集采样点"""
     fig, axes = plt.subplots(1, 4, figsize=(24, 5))
@@ -1230,8 +1247,14 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
             mean_ecc_ns = np.nan
             mean_circ_ns = np.nan
 
+        if 'Time_sec' in frame_df.columns:
+            time_sec = frame_df['Time_sec'].mean()
+        else:
+            time_sec = frame_idx / analysis_fps
+
         frame_stats.append({
             'Frame': frame_idx,
+            'Time_sec': time_sec,
             'Total_Cells': n_total,
             'Sickle_Count': n_sickle,
             'NonSickle_Count': n_nonsickle,
@@ -1253,11 +1276,11 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
     # 图1：Sickle比例趋势
     ax1 = axes[0]
     data_pct = stats_df.dropna(subset=['Sickle_Percent'])
-    ax1.plot(data_pct['Frame'], data_pct['Sickle_Percent'], 'o-',
+    ax1.plot(data_pct['Time_sec'], data_pct['Sickle_Percent'], 'o-',
              color=COLOR_S_AR, linewidth=2, markersize=6, label='Sickle %', alpha=0.7)
     # ax1.plot(stats_df['Frame'], stats_df['Sickle_Percent'], 'o-',
     #          color=COLOR_S_AR, linewidth=2, markersize=6, label='Sickle %', alpha=0.7)
-    ax1.set_xlabel("Frame", fontweight='bold')
+    ax1.set_xlabel("Time (s)", fontweight='bold')
     ax1.set_ylabel("Sickle Cell Percentage (%)", fontweight='bold')
     ax1.set_title("Sickle Cell Proportion Over Time", fontsize=14, fontweight='bold')
     ax1.legend(frameon=False)
@@ -1266,18 +1289,18 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
     ax2 = axes[1]
     # Sickle: 所有采样点
     data_ar = stats_df.dropna(subset=['Mean_AR_Sickle'])
-    ax2.plot(data_ar['Frame'], data_ar['Mean_AR_Sickle'], 'o-',
+    ax2.plot(data_ar['Time_sec'], data_ar['Mean_AR_Sickle'], 'o-',
              color=COLOR_S_AR, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     # ax2.plot(stats_df['Frame'], stats_df['Mean_AR_Sickle'], 'o-',
     #          color=COLOR_S_AR, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     # Non-sickle: 只显示frame 0的点
     ns_data = stats_df[stats_df['Frame'] == 0]
     if not ns_data.empty:
-        ax2.plot(ns_data['Frame'], ns_data['Mean_AR_NonSickle'], 's',
+        ax2.plot(ns_data['Time_sec'], ns_data['Mean_AR_NonSickle'], 's',
                  color=COLOR_NS_AR, markersize=10, label='Non-sickle (Frame 0)')
 
     ax2.axhline(y=1.6, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
-    ax2.set_xlabel("Frame", fontweight='bold')
+    ax2.set_xlabel("Time (s)", fontweight='bold')
     ax2.set_ylabel("Mean Aspect Ratio", fontweight='bold')
     ax2.set_title("Mean AR Over Time", fontsize=14, fontweight='bold')
     ax2.legend(frameon=False)
@@ -1285,14 +1308,14 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
     # 图3：Mean Eccentricity 趋势
     ax3 = axes[2]
     data_ecc = stats_df.dropna(subset=['Mean_ECC_Sickle'])
-    ax3.plot(data_ecc['Frame'], data_ecc['Mean_ECC_Sickle'], 'o-',
+    ax3.plot(data_ecc['Time_sec'], data_ecc['Mean_ECC_Sickle'], 'o-',
              color=COLOR_S_ECC, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     # ax3.plot(stats_df['Frame'], stats_df['Mean_ECC_Sickle'], 'o-',
     #          color=COLOR_S_ECC, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     if not ns_data.empty:
-        ax3.plot(ns_data['Frame'], ns_data['Mean_ECC_NonSickle'], 's',
+        ax3.plot(ns_data['Time_sec'], ns_data['Mean_ECC_NonSickle'], 's',
                  color=COLOR_NS_ECC, markersize=10, label='Non-sickle (Frame 0)')
-    ax3.set_xlabel("Frame", fontweight='bold')
+    ax3.set_xlabel("Time (s)", fontweight='bold')
     ax3.set_ylabel("Mean Eccentricity", fontweight='bold')
     ax3.set_title("Mean Eccentricity Over Time", fontsize=14, fontweight='bold')
     ax3.legend(frameon=False)
@@ -1300,14 +1323,14 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
     # 图4：Mean Circularity 趋势 (需求4)
     ax4 = axes[3]
     data_circ = stats_df.dropna(subset=['Mean_Circ_Sickle'])
-    ax4.plot(data_circ['Frame'], data_circ['Mean_Circ_Sickle'], 'o-',
+    ax4.plot(data_circ['Time_sec'], data_circ['Mean_Circ_Sickle'], 'o-',
              color=COLOR_S_CIRC, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     # ax4.plot(stats_df['Frame'], stats_df['Mean_Circ_Sickle'], 'o-',
     #          color=COLOR_S_CIRC, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     if not ns_data.empty:
-        ax4.plot(ns_data['Frame'], ns_data['Mean_Circ_NonSickle'], 's',
+        ax4.plot(ns_data['Time_sec'], ns_data['Mean_Circ_NonSickle'], 's',
                  color=COLOR_NS_CIRC, markersize=10, label='Non-sickle (Frame 0)')
-    ax4.set_xlabel("Frame", fontweight='bold')
+    ax4.set_xlabel("Time (s)", fontweight='bold')
     ax4.set_ylabel("Mean Circularity", fontweight='bold')
     ax4.set_title("Mean Circularity Over Time", fontsize=14, fontweight='bold')
     ax4.legend(frameon=False)
@@ -1329,7 +1352,8 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
                              low_res_tracker_config_path=DEFAULT_LOW_RES_TRACKER_CONFIG,
                              low_res_seg_model_path=DEFAULT_LOW_RES_SEG_MODEL,
                              low_res_det_conf='auto',
-                             low_res_iou=0.6):
+                             low_res_iou=0.6,
+                             analysis_fps=DEFAULT_ANALYSIS_FPS):
     """
     处理视频的多个指定帧
     逻辑与原始脚本完全一致：
@@ -1484,6 +1508,7 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
         frame0_records.append({
             'Cell_ID': cid,
             'Frame_Index': 0,
+            'Time_sec': 0.0,
             'Aspect_Ratio': ar_val,
             'Eccentricity': ecc_val,
             'Circularity': circ_val,  # 需求4
@@ -1642,6 +1667,7 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
                 frame_records.append({
                     'Cell_ID': cid,
                     'Frame_Index': frame_idx,
+                    'Time_sec': frame_idx / analysis_fps,
                     'Aspect_Ratio': ar_val,
                     'Eccentricity': ecc_val,
                     'Circularity': circ_val,  # 需求4
@@ -1735,7 +1761,7 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
 
     # 趋势图
     trend_stats = plot_multiframe_trend(all_frames_df, out_path + '/multiframe_trend.png', valid_target_frames,
-                                        max_target_frame)
+                                        max_target_frame, analysis_fps=analysis_fps)
     if trend_stats is not None:
         trend_stats.to_csv(out_path + '/multiframe_trend_stats.csv', index=False)
 
@@ -1755,8 +1781,8 @@ parser.add_argument('--target_frames', type=str, default=None,
                     help='Comma-separated list of frame indices to analyze')
 parser.add_argument('--max_time', type=float, default=None,
                     help='Analyze frame 0 and the frame at this many analysis seconds (default: 120)')
-parser.add_argument('--analysis_fps', type=float, default=DEFAULT_ANALYSIS_FPS,
-                    help='Analysis frames per second used to convert --max_time to frames (default: 4)')
+parser.add_argument('--analysis_fps', type=float, default=None,
+                    help='Frames per second used for --max_time and plot time axes (default: auto from video)')
 parser.add_argument('--full_video', action='store_true',
                     help='Analyze frame 0 and the final frame of each video')
 parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
@@ -1778,7 +1804,7 @@ parser.add_argument('--max_frame', type=int, default=480,
 
 args = parser.parse_args()
 
-if args.analysis_fps <= 0:
+if args.analysis_fps is not None and args.analysis_fps <= 0:
     parser.error('--analysis_fps must be greater than 0')
 
 target_frames = None
@@ -1798,19 +1824,24 @@ for op in out_path:
 
 all_videos_df = pd.DataFrame()
 combined_target_frames = set()
+combined_time_fps = None
 
 for idx, video_path in enumerate(video_paths):
     os.makedirs(out_path[idx], exist_ok=True)
+    cap_tmp = cv2.VideoCapture(video_path)
+    total_frames_tmp = int(cap_tmp.get(cv2.CAP_PROP_FRAME_COUNT))
+    source_fps_tmp = cap_tmp.get(cv2.CAP_PROP_FPS) or DEFAULT_ANALYSIS_FPS
+    cap_tmp.release()
+    time_fps_tmp = args.analysis_fps if args.analysis_fps is not None else source_fps_tmp
+    if combined_time_fps is None:
+        combined_time_fps = time_fps_tmp
     per_video_target_frames = target_frames
     if per_video_target_frames is None:
-        cap_tmp = cv2.VideoCapture(video_path)
-        total_frames_tmp = int(cap_tmp.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap_tmp.release()
         final_frame = max(0, total_frames_tmp - 1)
         if args.full_video:
             selected_frame = final_frame
         else:
-            selected_frame = min(int(round(args.max_time * args.analysis_fps)), final_frame)
+            selected_frame = min(int(round(args.max_time * time_fps_tmp)), final_frame)
         per_video_target_frames = [0, selected_frame]
     combined_target_frames.update(per_video_target_frames)
 
@@ -1824,7 +1855,8 @@ for idx, video_path in enumerate(video_paths):
         low_res_tracker_config_path=args.low_res_tracker_config,
         low_res_seg_model_path=args.low_res_seg_model,
         low_res_det_conf=args.low_res_det_conf,
-        low_res_iou=args.low_res_iou
+        low_res_iou=args.low_res_iou,
+        analysis_fps=time_fps_tmp
     )
 
     if not video_df.empty:
@@ -1930,7 +1962,8 @@ if not all_videos_df.empty:
                                     target_frames_for_combined)  # 需求4
 
     trend_stats = plot_multiframe_trend(all_videos_df, all_out + '/combined_multiframe_trend.png', target_frames_for_combined,
-                                        max(target_frames_for_combined))
+                                        max(target_frames_for_combined),
+                                        analysis_fps=combined_time_fps or DEFAULT_ANALYSIS_FPS)
     if trend_stats is not None:
         trend_stats.to_csv(all_out + '/combined_multiframe_trend_stats.csv', index=False)
 

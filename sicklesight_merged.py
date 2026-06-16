@@ -770,12 +770,19 @@ def match_cells_tracking(prev_cells, curr_masks, bboxes):
 # ─── SCRIPT-1 PLOTTING HELPERS ───────────────────────────────────────────────
 # =============================================================================
 
+def frame_time_seconds(df, analysis_fps):
+    """Use raw frame numbers for the analysis time axis."""
+    if 'Frame' in df.columns:
+        return df['Frame'] / analysis_fps
+    return df['FrameIndex'] / analysis_fps
+
+
 def plot_total_binary_ratio(df, out_path, frame_skip, fps, title='Total cell ratio (binary)'):
     """Plot (and save CSV of) overall sickle fraction over time."""
     total_pos   = df[[f'Class_{i}_pos'   for i in range(7)]].sum(axis=1)
     total_count = df[[f'Class_{i}_total' for i in range(7)]].sum(axis=1)
     total_ratio = 1 - total_pos / total_count.replace(0, np.nan)
-    time_sec    = df['FrameIndex'] * frame_skip / fps
+    time_sec    = frame_time_seconds(df, fps)
     y_percent   = total_ratio * 100
 
     plt.figure(figsize=(8, 5))
@@ -799,7 +806,7 @@ def plot_total_binary_ratio(df, out_path, frame_skip, fps, title='Total cell rat
 def plot_14_groups_ratio(df, out_path, frame_skip, fps,
                          title='Cell Ratio by Class and Pocked Status'):
     """Plot sickling curves for all 14 Class×Pocked combinations."""
-    time_sec = df['FrameIndex'] * frame_skip / fps
+    time_sec = frame_time_seconds(df, fps)
     plt.figure(figsize=(14, 8))
     base_colors = ["#0922e3", "#099ae3", "#e39e09", "#9e09e3", "#895129", "#09e360", "#f05151"]
 
@@ -1186,7 +1193,20 @@ def plot_7class_nature_style_circ(df, out_path, frame_idx=None):
 
 def _multiframe_violin_pair(all_frames_df, out_path, target_frames, metric, title_prefix):
     """Generic helper: draw Non-sickle vs Sickle across-frames violin+box plots."""
-    df_filt = all_frames_df[all_frames_df['Frame_Index'].isin(target_frames)]
+    df_filt = all_frames_df[all_frames_df['Frame_Index'].isin(target_frames)].copy()
+    if 'Time_sec' in df_filt.columns:
+        df_filt['Time_Label'] = df_filt['Time_sec'].map(lambda x: f"{x:g}s")
+        order = [
+            f"{df_filt.loc[df_filt['Frame_Index'] == f, 'Time_sec'].iloc[0]:g}s"
+            for f in target_frames
+            if not df_filt[df_filt['Frame_Index'] == f].empty
+        ]
+        x_col = 'Time_Label'
+        x_label = 'Time (s)'
+    else:
+        order = target_frames
+        x_col = 'Frame_Index'
+        x_label = 'Frame'
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
     for ax, sickle_val, grp_title in [
         (axes[0], 1, f"Non-sickle Cells – {metric} Across Frames"),
@@ -1194,16 +1214,16 @@ def _multiframe_violin_pair(all_frames_df, out_path, target_frames, metric, titl
     ]:
         sub = df_filt[df_filt['Sickle_Label'] == sickle_val]
         if not sub.empty:
-            sns.violinplot(data=sub, x='Frame_Index', y=metric,
+            sns.violinplot(data=sub, x=x_col, y=metric, order=order,
                            palette=FRAME_COLORS[:len(target_frames)],
                            inner=None, linewidth=0, alpha=0.4, ax=ax)
-            sns.boxplot(data=sub, x='Frame_Index', y=metric, width=0.15,
+            sns.boxplot(data=sub, x=x_col, y=metric, order=order, width=0.15,
                         boxprops={'facecolor':'white','edgecolor':'black','alpha':0.9},
                         medianprops={'color':'black','linewidth':1.5},
                         showfliers=False, ax=ax)
         if metric == 'Aspect_Ratio':
             ax.axhline(y=1.6, color='red', linestyle='--', linewidth=1.5, alpha=0.7, zorder=0)
-        ax.set_xlabel("Frame", fontweight='bold');  ax.set_ylabel(metric, fontweight='bold')
+        ax.set_xlabel(x_label, fontweight='bold');  ax.set_ylabel(metric, fontweight='bold')
         ax.set_title(grp_title, fontsize=14, fontweight='bold')
     sns.despine(offset=10, trim=True);  plt.tight_layout()
     plt.savefig(out_path, dpi=300, bbox_inches='tight');  plt.close()
@@ -1221,7 +1241,8 @@ def plot_multiframe_comparison_circ(all_frames_df, out_path, target_frames):
     _multiframe_violin_pair(all_frames_df, out_path, target_frames, 'Circularity', 'Circularity')
 
 
-def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_frame):
+def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_frame,
+                          analysis_fps=4.0):
     """Plot Sickle-cell proportion + mean AR / ECC / Circularity trends over frames."""
     fig, axes = plt.subplots(1, 4, figsize=(24, 5))
     captured_frames = sorted(all_frames_df['Frame_Index'].unique())
@@ -1248,8 +1269,14 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
         else:
             mean_ar_ns = mean_ecc_ns = mean_circ_ns = np.nan
 
+        if 'Time_sec' in fdf.columns:
+            time_sec = fdf['Time_sec'].mean()
+        else:
+            time_sec = frame_idx / analysis_fps
+
         frame_stats.append({
             'Frame': frame_idx,
+            'Time_sec': time_sec,
             'Total_Cells': n_total, 'Sickle_Count': n_sickle,
             'NonSickle_Count': n_nonsickle, 'Sickle_Percent': pct_sickle,
             'Mean_AR_Sickle': mean_ar_s,   'Mean_AR_NonSickle':   mean_ar_ns,
@@ -1264,41 +1291,41 @@ def plot_multiframe_trend(all_frames_df, out_path, valid_target_frames, max_fram
     ns_data = stats_df[stats_df['Frame'] == 0]
 
     ax1 = axes[0]
-    ax1.plot(stats_df.dropna(subset=['Sickle_Percent'])['Frame'],
+    ax1.plot(stats_df.dropna(subset=['Sickle_Percent'])['Time_sec'],
              stats_df.dropna(subset=['Sickle_Percent'])['Sickle_Percent'],
              'o-', color=COLOR_S_AR, linewidth=2, markersize=6, alpha=0.7)
-    ax1.set_xlabel("Frame", fontweight='bold');  ax1.set_ylabel("Sickle Cell Percentage (%)", fontweight='bold')
+    ax1.set_xlabel("Time (s)", fontweight='bold');  ax1.set_ylabel("Sickle Cell Percentage (%)", fontweight='bold')
     ax1.set_title("Sickle Cell Proportion Over Time", fontsize=14, fontweight='bold')
 
     ax2 = axes[1]
-    ax2.plot(stats_df.dropna(subset=['Mean_AR_Sickle'])['Frame'],
+    ax2.plot(stats_df.dropna(subset=['Mean_AR_Sickle'])['Time_sec'],
              stats_df.dropna(subset=['Mean_AR_Sickle'])['Mean_AR_Sickle'],
              'o-', color=COLOR_S_AR, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     if not ns_data.empty:
-        ax2.plot(ns_data['Frame'], ns_data['Mean_AR_NonSickle'], 's',
+        ax2.plot(ns_data['Time_sec'], ns_data['Mean_AR_NonSickle'], 's',
                  color=COLOR_NS_AR, markersize=10, label='Non-sickle (Frame 0)')
     ax2.axhline(y=1.6, color='red', linestyle=':', linewidth=1.5, alpha=0.7)
-    ax2.set_xlabel("Frame", fontweight='bold');  ax2.set_ylabel("Mean Aspect Ratio", fontweight='bold')
+    ax2.set_xlabel("Time (s)", fontweight='bold');  ax2.set_ylabel("Mean Aspect Ratio", fontweight='bold')
     ax2.set_title("Mean AR Over Time", fontsize=14, fontweight='bold');  ax2.legend(frameon=False)
 
     ax3 = axes[2]
-    ax3.plot(stats_df.dropna(subset=['Mean_ECC_Sickle'])['Frame'],
+    ax3.plot(stats_df.dropna(subset=['Mean_ECC_Sickle'])['Time_sec'],
              stats_df.dropna(subset=['Mean_ECC_Sickle'])['Mean_ECC_Sickle'],
              'o-', color=COLOR_S_ECC, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     if not ns_data.empty:
-        ax3.plot(ns_data['Frame'], ns_data['Mean_ECC_NonSickle'], 's',
+        ax3.plot(ns_data['Time_sec'], ns_data['Mean_ECC_NonSickle'], 's',
                  color=COLOR_NS_ECC, markersize=10, label='Non-sickle (Frame 0)')
-    ax3.set_xlabel("Frame", fontweight='bold');  ax3.set_ylabel("Mean Eccentricity", fontweight='bold')
+    ax3.set_xlabel("Time (s)", fontweight='bold');  ax3.set_ylabel("Mean Eccentricity", fontweight='bold')
     ax3.set_title("Mean Eccentricity Over Time", fontsize=14, fontweight='bold');  ax3.legend(frameon=False)
 
     ax4 = axes[3]
-    ax4.plot(stats_df.dropna(subset=['Mean_Circ_Sickle'])['Frame'],
+    ax4.plot(stats_df.dropna(subset=['Mean_Circ_Sickle'])['Time_sec'],
              stats_df.dropna(subset=['Mean_Circ_Sickle'])['Mean_Circ_Sickle'],
              'o-', color=COLOR_S_CIRC, linewidth=2, markersize=6, label='Sickle', alpha=0.7)
     if not ns_data.empty:
-        ax4.plot(ns_data['Frame'], ns_data['Mean_Circ_NonSickle'], 's',
+        ax4.plot(ns_data['Time_sec'], ns_data['Mean_Circ_NonSickle'], 's',
                  color=COLOR_NS_CIRC, markersize=10, label='Non-sickle (Frame 0)')
-    ax4.set_xlabel("Frame", fontweight='bold');  ax4.set_ylabel("Mean Circularity", fontweight='bold')
+    ax4.set_xlabel("Time (s)", fontweight='bold');  ax4.set_ylabel("Mean Circularity", fontweight='bold')
     ax4.set_title("Mean Circularity Over Time", fontsize=14, fontweight='bold');  ax4.legend(frameon=False)
 
     sns.despine(offset=10, trim=True);  plt.tight_layout()
@@ -1437,17 +1464,18 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     # ── Initialise video capture ──
     print('- Initialization......')
     cap        = cv2.VideoCapture(video_path)
-    source_fps = cap.get(cv2.CAP_PROP_FPS) or fps
+    source_fps = cap.get(cv2.CAP_PROP_FPS) or 4.0
+    time_fps   = fps if fps is not None else source_fps
     W          = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H          = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc     = cv2.VideoWriter_fourcc(*'MJPG')
-    output_fps = source_fps / frame_skip
+    output_fps = time_fps / frame_skip
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     max_valid_frame = max(0, total_frames - 1)
     if max_time_sec is not None:
-        requested_max_frame = int(round(max_time_sec * fps))
+        requested_max_frame = int(round(max_time_sec * time_fps))
         max_frame = min(requested_max_frame, max_valid_frame)
-        print(f"  Max duration: {max_time_sec:g}s × {fps:.2f} analysis fps -> frame {max_frame}")
+        print(f"  Max duration: {max_time_sec:g}s × {time_fps:.2f} fps -> frame {max_frame}")
     else:
         max_frame = min(max_frame, max_valid_frame)
         print(f"  Max frame: {max_frame}")
@@ -1579,6 +1607,7 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
         morph_records.append({
             'Cell_ID':      cid,
             'Frame_Index':  0,
+            'Time_sec':     0.0,
             'Aspect_Ratio': ar_val,
             'Eccentricity': ecc_val,
             'Circularity':  circ_val,
@@ -1688,6 +1717,7 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
             morph_records.append({
                 'Cell_ID':      cid,
                 'Frame_Index':  frame_idx,
+            'Time_sec':     frame_idx / time_fps,
                 'Aspect_Ratio': ar_val,
                 'Eccentricity': ecc_val,
                 'Circularity':  circ_val,
@@ -1855,7 +1885,7 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     df_14groups.to_csv(out_path + '/state_ratio_report_14groups.csv', index=False)
 
     # State-ratio line chart (7 classes)
-    time_sec = df['FrameIndex'] * frame_skip / fps
+    time_sec = frame_time_seconds(df, time_fps)
     plt.figure(figsize=(10, 6))
     for cid_cls in range(num_classes):
         y_pct = df[f'Class_{cid_cls}'] * 100
@@ -1866,10 +1896,10 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     plt.legend();  plt.grid(True);  plt.tight_layout()
     plt.savefig(out_path + '/state_ratio_plot.png', dpi=300);  plt.close()
 
-    plot_total_binary_ratio(df, out_path + '/state_ratio_plot_binary.png', frame_skip, fps)
+    plot_total_binary_ratio(df, out_path + '/state_ratio_plot_binary.png', frame_skip, time_fps)
 
     # Pocked line chart
-    time_sec2   = df2['FrameIndex'] * frame_skip / fps
+    time_sec2   = frame_time_seconds(df2, time_fps)
     total_pock  = sum(pock_counts_final.values())
     plt.figure(figsize=(10, 6))
     for pid in range(2):
@@ -1884,7 +1914,7 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     plt.savefig(out_path + '/state_ratio_plot_pocked.png', dpi=300);  plt.close()
 
     plot_14_groups_ratio(df_14groups, out_path + '/state_ratio_plot_14groups.png',
-                         frame_skip, fps)
+                         frame_skip, time_fps)
 
     # =========================================================================
     # PIPELINE-2 PER-VIDEO OUTPUTS
@@ -1934,7 +1964,8 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
         plot_multiframe_comparison_circ(all_frames_df, out_path + '/multiframe_comparison_circ.png', valid_target_frames)
 
         trend_stats = plot_multiframe_trend(all_frames_df, out_path + '/multiframe_trend.png',
-                                            valid_target_frames, max(valid_target_frames))
+                                            valid_target_frames, max(valid_target_frames),
+                                            analysis_fps=time_fps)
         if trend_stats is not None:
             trend_stats.to_csv(out_path + '/multiframe_trend_stats.csv', index=False)
 
@@ -1958,8 +1989,8 @@ parser.add_argument('--frame_skip', type=int, default=2,
                     help='Process every Nth frame (default: 2)')
 parser.add_argument('--max_time', type=float, default=None,
                     help='Max analysis seconds (default: 120; shorter videos run fully)')
-parser.add_argument('--analysis_fps', type=float, default=4.0,
-                    help='Analysis frames per second used to convert --max_time to frames (default: 4)')
+parser.add_argument('--analysis_fps', type=float, default=None,
+                    help='Frames per second used for --max_time, plots, and output video playback (default: auto from video)')
 parser.add_argument('--max_frame', type=int, default=None,
                     help='Max frame index to process; used only when --max_time is not set')
 parser.add_argument('--full_video', action='store_true',
@@ -1981,7 +2012,7 @@ parser.add_argument('--low_res_iou', type=float, default=0.6,
 
 args = parser.parse_args()
 
-if args.analysis_fps <= 0:
+if args.analysis_fps is not None and args.analysis_fps <= 0:
     parser.error('--analysis_fps must be greater than 0')
 
 video_paths   = args.inputs.split(',')
@@ -2005,6 +2036,18 @@ print(f"Tracking backend: {args.tracking_backend}")
 output   = [os.path.splitext(os.path.basename(v))[0] + '.avi' for v in video_paths]
 out_path = [os.path.join(all_out, os.path.splitext(os.path.basename(v))[0]) for v in video_paths]
 fps      = args.analysis_fps
+
+
+def resolve_time_fps(video_path, override_fps=None, fallback=4.0):
+    if override_fps is not None:
+        return override_fps
+    cap_tmp = cv2.VideoCapture(video_path)
+    video_fps = cap_tmp.get(cv2.CAP_PROP_FPS) or fallback
+    cap_tmp.release()
+    return video_fps
+
+
+combined_time_fps = resolve_time_fps(video_paths[0], fps) if video_paths else 4.0
 
 os.makedirs(all_out, exist_ok=True)
 for op in out_path:
@@ -2114,7 +2157,7 @@ for cls_id in range(7):
             1 - final_df_14groups[f'{col}_pos'] / final_df_14groups[f'{col}_total'], 0)
 final_df_14groups.to_csv(all_out + '/combined_state_ratio_report_14groups.csv', index=False)
 
-time_sec = final_df['FrameIndex'] * frame_skip / fps
+time_sec = frame_time_seconds(final_df, combined_time_fps)
 plt.figure(figsize=(10, 6))
 for cls_id in range(7):
     y_pct = final_df[f'Class_{cls_id}'] * 100
@@ -2124,9 +2167,9 @@ plt.xlabel('Time (s)');  plt.ylabel('Sickled fraction (%)');  plt.ylim(0, 100)
 plt.legend();  plt.grid(True);  plt.tight_layout()
 plt.savefig(all_out + '/combined_state_ratio_plot.png', dpi=300);  plt.close()
 
-plot_total_binary_ratio(final_df, all_out + '/state_ratio_plot_binary.png', frame_skip, fps)
+plot_total_binary_ratio(final_df, all_out + '/state_ratio_plot_binary.png', frame_skip, combined_time_fps)
 
-time_sec2     = final_df_pock['FrameIndex'] * frame_skip / fps
+time_sec2     = frame_time_seconds(final_df_pock, combined_time_fps)
 total_pock_all= sum(all_class_counts_pock.values())
 plt.figure(figsize=(10, 6))
 for cls_id in range(2):
@@ -2142,7 +2185,7 @@ plt.savefig(all_out + '/combined_state_ratio_plot_pock.png', dpi=300);  plt.clos
 
 plot_14_groups_ratio(final_df_14groups,
                      all_out + '/combined_state_ratio_plot_14groups.png',
-                     frame_skip, fps,
+                     frame_skip, combined_time_fps,
                      title='Combined Cell Ratio by Class and Pocked Status (All Videos)')
 
 sizes         = [all_class_counts.get(i, 0) for i in range(7)]
@@ -2201,7 +2244,8 @@ if not all_videos_df.empty:
     plot_multiframe_comparison_circ(all_videos_df, all_out + '/combined_multiframe_comparison_circ.png', combined_target_frames)
 
     trend_stats = plot_multiframe_trend(all_videos_df, all_out + '/combined_multiframe_trend.png',
-                                        combined_target_frames, max(combined_target_frames))
+                                        combined_target_frames, max(combined_target_frames),
+                                        analysis_fps=combined_time_fps)
     if trend_stats is not None:
         trend_stats.to_csv(all_out + '/combined_multiframe_trend_stats.csv', index=False)
 else:
