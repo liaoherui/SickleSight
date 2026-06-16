@@ -1437,17 +1437,17 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
     # ── Initialise video capture ──
     print('- Initialization......')
     cap        = cv2.VideoCapture(video_path)
-    fps        = cap.get(cv2.CAP_PROP_FPS)
+    source_fps = cap.get(cv2.CAP_PROP_FPS) or fps
     W          = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H          = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc     = cv2.VideoWriter_fourcc(*'MJPG')
-    output_fps = fps / frame_skip
+    output_fps = source_fps / frame_skip
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     max_valid_frame = max(0, total_frames - 1)
     if max_time_sec is not None:
         requested_max_frame = int(round(max_time_sec * fps))
         max_frame = min(requested_max_frame, max_valid_frame)
-        print(f"  Max duration: {max_time_sec:g}s × {fps:.2f}fps -> frame {max_frame}")
+        print(f"  Max duration: {max_time_sec:g}s × {fps:.2f} analysis fps -> frame {max_frame}")
     else:
         max_frame = min(max_frame, max_valid_frame)
         print(f"  Max frame: {max_frame}")
@@ -1957,7 +1957,7 @@ parser.add_argument('-o', '--output_dir', type=str,
 parser.add_argument('--frame_skip', type=int, default=2,
                     help='Process every Nth frame (default: 2)')
 parser.add_argument('--max_time', type=float, default=None,
-                    help='Max duration to process per video in seconds (default: 120; shorter videos run fully)')
+                    help='Max analysis seconds at 4 frames/second (default: 120; shorter videos run fully)')
 parser.add_argument('--max_frame', type=int, default=None,
                     help='Max frame index to process; used only when --max_time is not set')
 parser.add_argument('--full_video', action='store_true',

@@ -155,7 +155,7 @@ class SickleAnalysisGUI:
                   font=('Helvetica', 9, 'bold')).pack(anchor=tk.W, pady=(10, 2))
         duration_frame = ttk.Frame(col2, style="Dark.TFrame")
         duration_frame.pack(fill=tk.X)
-        ttk.Label(duration_frame, text="Max seconds:", style="Dark.TLabel").pack(side=tk.LEFT)
+        ttk.Label(duration_frame, text="Max seconds (4 frames/sec):", style="Dark.TLabel").pack(side=tk.LEFT)
         self.entry_max_seconds = ttk.Entry(duration_frame, textvariable=self.max_seconds_var, width=8)
         self.entry_max_seconds.pack(side=tk.LEFT, padx=(6, 0))
 

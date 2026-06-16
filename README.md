@@ -115,7 +115,7 @@ python sicklesight_gui.py
 4. Choose **Segmentation / Tracking**:
    - `Cellpose` for standard-resolution videos
    - `Low-resolution YOLO/BoT-SORT` for low-resolution videos
-5. Set **Max seconds**. The default is `120`; shorter videos are processed fully.
+5. Set **Max seconds**. The default is `120`; SickleSight uses `4` frames per second for this analysis time setting.
 6. Confirm the **Output Folder**. The default is `output_default/` beside the GUI script.
 7. Click **Generate Script & Run Analysis**.
 
@@ -126,6 +126,8 @@ python sicklesight_gui.py
 All three analysis scripts can be used directly from the terminal.
 
 Useful time options:
+
+SickleSight uses `4` frames per second for `--max_time`. For example, `--max_time 120` processes up to frame `480`, regardless of the video file's metadata FPS.
 
 | Option | Meaning |
 |---|---|
@@ -238,9 +240,9 @@ python sicklesight_part1.py \
 | `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
 | `-o` / `--output_dir` | No | `output_default/` | Output directory |
 | `--frame_skip` | No | `2` | Process every N-th frame (higher = faster, lower temporal resolution) |
-| `--max_time` | No | — | Maximum seconds to process per video |
+| `--max_time` | No | `120` | Maximum seconds to process per video; shorter videos run fully |
 | `--full_video` | No | Off | Process the complete video |
-| `--max_frame` | No | `480` | Frame-based limit used when `--max_time` and `--full_video` are not set |
+| `--max_frame` | No | — | Frame-based limit, used only when `--max_time` is not set |
 | `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
 | `--low_res_det_conf` | No | `auto` | YOLO detection confidence for low-resolution mode; accepts `auto` or a number |
 
@@ -326,9 +328,9 @@ python sicklesight_part2.py \
 |---|---|---|---|
 | `-i` / `--inputs` | Yes | — | Comma-separated list of input video file paths |
 | `-o` / `--output_dir` | No | `output_default/` | Output directory |
-| `--max_time` | No | — | Analyze frame 0 and the frame at this many seconds |
+| `--max_time` | No | `120` | Analyze frame 0 and the frame at this many seconds |
 | `--full_video` | No | Off | Analyze frame 0 and the final frame |
-| `--target_frames` | No | `0` and frame `480` if available | Comma-separated frame indices for custom morphology analysis |
+| `--target_frames` | No | `0` and the frame at 120 seconds | Comma-separated frame indices for custom morphology analysis |
 | `--tracking_backend` | No | `cellpose` | Use `cellpose` or `low_res` |
 | `--low_res_det_conf` | No | `auto` | YOLO detection confidence for low-resolution mode; accepts `auto` or a number |
 

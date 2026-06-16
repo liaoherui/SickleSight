@@ -222,10 +222,10 @@ parser.add_argument('-o', '--output_dir', type=str, default=DEFAULT_OUTPUT_DIR,
                     help='Output directory (default: output_default beside this script)')
 parser.add_argument('--frame_skip', type=int, default=2,
                     help='Process every Nth frame')
-parser.add_argument('--max_frame', type=int, default=480,
-                    help='Max number of frames to process')
+parser.add_argument('--max_frame', type=int, default=None,
+                    help='Max frame index to process; used only when --max_time is not set')
 parser.add_argument('--max_time', type=float, default=None,
-                    help='Max duration to process per video in seconds')
+                    help='Max analysis seconds at 4 frames/second (default: 120; shorter videos run fully)')
 parser.add_argument('--full_video', action='store_true',
                     help='Process each full video')
 parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
@@ -249,6 +249,10 @@ frame_skip = args.frame_skip
 max_frame = args.max_frame
 max_time = args.max_time
 full_video = args.full_video
+if full_video:
+    max_time = None
+elif max_time is None and max_frame is None:
+    max_time = 120.0
 output = [os.path.splitext(os.path.basename(v))[0] + '.avi' for v in video_paths]
 out_path = [os.path.join(all_out, os.path.splitext(os.path.basename(v))[0]) for v in video_paths]
 fps = 4  # 4 frames - 1 second
@@ -767,12 +771,12 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
     # ========= 视频初始化 =========
     print('- Initialization......')
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    source_fps = cap.get(cv2.CAP_PROP_FPS) or fps
     W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc = cv2.VideoWriter_fourcc(*'MJPG')
     print('- Initialization......Done~')
-    output_fps = fps / frame_skip
+    output_fps = source_fps / frame_skip
 
     # ========= 第0帧：分割 + 初始分类 =========
     ret, first_frame = cap.read()
@@ -907,7 +911,9 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
         print(f"  Processing full video: {total_frames} frames")
     elif max_time_sec is not None:
         max_frame = min(int(round(max_time_sec * fps)), total_frames)
-        print(f"  Max duration: {max_time_sec:g}s × {fps:.2f}fps -> {max_frame} frames")
+        print(f"  Max duration: {max_time_sec:g}s × {fps:.2f} analysis fps -> {max_frame} frames")
+    elif max_frame is None:
+        max_frame = total_frames
     elif max_frame > total_frames:
         max_frame = total_frames
 

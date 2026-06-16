@@ -41,6 +41,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CELLBOX_MODELS_DIR = os.path.join(SCRIPT_DIR, 'CellBox-Models')
 DEFAULT_OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'output_default')
 DEFAULT_CELLPOSE_MODEL = os.path.join(CELLBOX_MODELS_DIR, 'cyto3_train0327')
+ANALYSIS_FPS = 4.0
 
 DNAME = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G'}
 CLS_ID = {v: k for k, v in DNAME.items()}
@@ -1753,7 +1754,7 @@ parser.add_argument('-o', '--output_dir', type=str, default=DEFAULT_OUTPUT_DIR,
 parser.add_argument('--target_frames', type=str, default=None,
                     help='Comma-separated list of frame indices to analyze')
 parser.add_argument('--max_time', type=float, default=None,
-                    help='Analyze frame 0 and the frame at this many seconds')
+                    help='Analyze frame 0 and the frame at this many analysis seconds, using 4 frames/second (default: 120)')
 parser.add_argument('--full_video', action='store_true',
                     help='Analyze frame 0 and the final frame of each video')
 parser.add_argument('--tracking_backend', type=str, choices=['cellpose', 'low_res', 'scdtrack'], default='cellpose',
@@ -1778,6 +1779,8 @@ args = parser.parse_args()
 target_frames = None
 if args.target_frames:
     target_frames = [int(f.strip()) for f in args.target_frames.split(',') if f.strip()]
+elif not args.full_video and args.max_time is None:
+    args.max_time = 120.0
 print(f"Target frames to analyze: {target_frames if target_frames is not None else '0 + selected final frame'}")
 
 video_paths = args.inputs.split(',')
@@ -1797,15 +1800,12 @@ for idx, video_path in enumerate(video_paths):
     if per_video_target_frames is None:
         cap_tmp = cv2.VideoCapture(video_path)
         total_frames_tmp = int(cap_tmp.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps_tmp = cap_tmp.get(cv2.CAP_PROP_FPS) or 4.0
         cap_tmp.release()
         final_frame = max(0, total_frames_tmp - 1)
         if args.full_video:
             selected_frame = final_frame
-        elif args.max_time is not None:
-            selected_frame = min(int(round(args.max_time * fps_tmp)), final_frame)
         else:
-            selected_frame = min(480, final_frame)
+            selected_frame = min(int(round(args.max_time * ANALYSIS_FPS)), final_frame)
         per_video_target_frames = [0, selected_frame]
     combined_target_frames.update(per_video_target_frames)
 
