@@ -141,14 +141,11 @@ Pipeline 1 and Pipeline 2 use the standard Cellpose backend. For low-resolution 
 
 Runs both Pipeline 1 (see below) and Pipeline 2 (see below) in a single pass — more efficient than running them sequentially.
 
+Basic command:
+
 ```bash
 python sicklesight_merged.py \
-    -i video1.mp4,video2.mp4 \
-    [--frame_skip 2] \
-    [--max_time 120] \
-    [--full_video] \
-    [-o /path/to/output] \
-    [--tracking_backend cellpose|low_res]
+    -i video1.mp4,video2.mp4
 ```
 
 | Argument | Required | Default | Description |
@@ -224,13 +221,11 @@ python sicklesight_merged.py \
 
 Tracks the sickled/non-sickled state of each cell across all frames and produces state-ratio time curves and an annotated output video.
 
+Basic command:
+
 ```bash
 python sicklesight_part1.py \
-    -i video1.mp4,video2.mp4 \
-    [-o /path/to/output] \
-    [--frame_skip 2] \
-    [--max_time 120] \
-    [--full_video]
+    -i video1.mp4,video2.mp4
 ```
 
 | Argument | Required | Default | Description |
@@ -286,12 +281,11 @@ python sicklesight_part1.py \
 
 Measures aspect ratio, eccentricity, and circularity at specified frames and generates violin plots comparing sickled vs. non-sickled populations.
 
+Basic command:
+
 ```bash
 python sicklesight_part2.py \
-    -i video1.mp4,video2.mp4 \
-    [-o /path/to/output] \
-    [--max_time 120] \
-    [--full_video]
+    -i video1.mp4,video2.mp4
 ```
 
 | Argument | Required | Default | Description |
