@@ -28,6 +28,7 @@ import argparse
 import os
 import pickle
 import torch.nn.functional as F
+from device_utils import get_cellpose_gpu_enabled, get_torch_device, get_ultralytics_device
 from low_res_backend import (
     DEFAULT_LOW_RES_SEG_MODEL,
     DEFAULT_LOW_RES_TRACKER_CONFIG,
@@ -65,14 +66,12 @@ CLS_ID = {v: k for k, v in DNAME.items()}
 # output_video_path = 'output/annotated_video.avi'
 # ============ Device ==============
 
-# Correct cross-platform device selection
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
-print("Using device:", device)
+device = get_torch_device()
+ultralytics_device = get_ultralytics_device(device)
+cellpose_gpu = get_cellpose_gpu_enabled(device)
+print("Using PyTorch device:", device)
+print("Using Ultralytics device:", ultralytics_device)
+print("Using Cellpose gpu=", cellpose_gpu)
 
 
 # ============ Model Definitions ==============
@@ -456,7 +455,7 @@ def segment_frame_downscaled_ds(original_frame, model_path, out_path, ratio=0.2,
     resized_frame = cv2.resize(original_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
     # 加载模型并运行Cellpose
-    cellpose_model = models.CellposeModel(gpu=True, pretrained_model=model_path)
+    cellpose_model = models.CellposeModel(gpu=cellpose_gpu, pretrained_model=model_path)
     masks, flows, styles = cellpose_model.eval(resized_frame, diameter=diameter, channels=[0, 0])
 
     # Debug only for frame 0
@@ -814,9 +813,14 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
             low_res_yolo_model_path,
             low_res_tracker_config_path,
             None,
+            device=device,
         )
         low_res_det_conf_value = resolve_low_res_det_conf(
-            video_path, low_res_state['yolo'], low_res_det_conf)
+            video_path,
+            low_res_state['yolo'],
+            low_res_det_conf,
+            yolo_device=low_res_state.get('yolo_device'),
+        )
 
     # Note (kaiyu):
     # We first run through the predictions, and only after all

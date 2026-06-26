@@ -21,6 +21,8 @@ from collections import deque, defaultdict, Counter
 import datetime
 import sys
 
+from device_utils import get_torch_device, get_ultralytics_device
+
 # ===== Numpy compatibility fix (numpy 2.x -> 1.x) =====
 # Fix: numpy._core module missing in older numpy versions
 if not hasattr(np, '_core'):
@@ -164,7 +166,8 @@ def display_name(c, count=None):
     else:
         return f"{letter}_{c}"
 
-def reclassify_by_aspect_ratio(crop, seg_model, base_label, conf_threshold=0.05, aspect_ratio_threshold=1.7):
+def reclassify_by_aspect_ratio(crop, seg_model, base_label, conf_threshold=0.05,
+                               aspect_ratio_threshold=1.7, yolo_device=None):
     """
     Reclassify Dis and ISC labels using seg model aspect ratio.
     
@@ -185,7 +188,13 @@ def reclassify_by_aspect_ratio(crop, seg_model, base_label, conf_threshold=0.05,
     
     try:
         # Run seg model prediction
-        results = seg_model.predict(source=crop, conf=conf_threshold, save=False, verbose=False)
+        results = seg_model.predict(
+            source=crop,
+            conf=conf_threshold,
+            save=False,
+            verbose=False,
+            device=yolo_device,
+        )
         
         if results[0].masks is None or len(results[0].masks.data) == 0:
             # No mask detected — keep original label
@@ -855,7 +864,7 @@ def apply_ret_constraint(sickle_predictions, all_frame_data, initial_images, ini
 
 
 
-def auto_detect_conf(video_path, yolo_model, n_frames=5):
+def auto_detect_conf(video_path, yolo_model, n_frames=5, yolo_device=None):
     """Probe the video to automatically choose DETECTION_CONFIDENCE.
 
     Runs YOLO at conf=0.1 on a few early frames and measures the fraction of
@@ -883,7 +892,13 @@ def auto_detect_conf(video_path, yolo_model, n_frames=5):
         ret, frame = cap.read()
         if not ret:
             continue
-        results = yolo_model.predict(frame, conf=0.1, max_det=2000, verbose=False)[0]
+        results = yolo_model.predict(
+            frame,
+            conf=0.1,
+            max_det=2000,
+            verbose=False,
+            device=yolo_device,
+        )[0]
         if results.boxes is not None and len(results.boxes) > 0:
             confs = results.boxes.conf.cpu().numpy()
             fracs.append(float(np.mean(confs >= 0.9)))
@@ -972,6 +987,7 @@ def process_single_video(video_path, models_dict, device, output_dir):
     
     yolo = models_dict['yolo']
     seg_model = models_dict['seg_model']
+    yolo_device = models_dict.get('yolo_device', get_ultralytics_device(device))
     mc_models = models_dict['mc_models']
     mc_transform = models_dict['mc_transform']
     siamese = models_dict['siamese']
@@ -1092,7 +1108,7 @@ def process_single_video(video_path, models_dict, device, output_dir):
 
             _tracker_yaml = os.path.join(CELLBOX_MODELS_DIR, 'configs', 'botsort_cell.yaml')
             res = yolo.track(source=orig, persist=True, conf=Config.DETECTION_CONFIDENCE, iou=Config.YOLO_IOU,
-                             max_det=2000, tracker=_tracker_yaml)[0]
+                             max_det=2000, tracker=_tracker_yaml, device=yolo_device)[0]
 
             # persist_flag = (not first_frame_of_video)
             # res = yolo.track(source=orig, persist=persist_flag, conf=Config.DETECTION_CONFIDENCE, iou=0.3)[0]
@@ -1178,7 +1194,9 @@ def process_single_video(video_path, models_dict, device, output_dir):
                 # Step 2: aspect-ratio reclassification for Dis/ISC
                 if Config.USE_SEG_RECLASSIFY and seg_model is not None and base_lbl in ['Dis', 'ISC']:
                     reclassified_lbl, aspect_ratio = reclassify_by_aspect_ratio(
-                        crop, seg_model, base_lbl, conf_threshold=0.05, aspect_ratio_threshold=Config.SEG_ASPECT_RATIO_THRESHOLD
+                        crop, seg_model, base_lbl, conf_threshold=0.05,
+                        aspect_ratio_threshold=Config.SEG_ASPECT_RATIO_THRESHOLD,
+                        yolo_device=yolo_device,
                     )
                     if reclassified_lbl != base_lbl and aspect_ratio is not None:
                         print(f"    Track {tid}: Reclassified {base_lbl} → {reclassified_lbl} (AR={aspect_ratio:.2f})")
@@ -1814,7 +1832,8 @@ def main(video_path, model_paths, output_root=None):
     now = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     name = f"single_video_{video_name}_{now}"
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = get_torch_device()
+    yolo_device = get_ultralytics_device(device)
 
     _default_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'result')
     output_dir = os.path.join(output_root or _default_root, f"results_{name}")
@@ -1913,6 +1932,7 @@ def main(video_path, model_paths, output_root=None):
         models_dict = {
             'yolo': yolo,
             'seg_model': seg_model,
+            'yolo_device': yolo_device,
             'mc_models': mc_models,
             'mc_transform': mc_transform,
             'siamese': siamese
@@ -1923,7 +1943,8 @@ def main(video_path, model_paths, output_root=None):
         print(f"    - Segmentation model for aspect ratio")
         print(f"    - {len(mc_models)} multi-class models")
         print(f"    - Siamese model")
-        print(f"  Using device: {device}")
+        print(f"  Using PyTorch device: {device}")
+        print(f"  Using Ultralytics device: {yolo_device}")
         
     except Exception as e:
         print(f"Error loading models: {e}")
@@ -1940,7 +1961,11 @@ def main(video_path, model_paths, output_root=None):
 
     if Config.AUTO_DET_CONF:
         print("Auto-detecting detection confidence from video...")
-        Config.DETECTION_CONFIDENCE = auto_detect_conf(video_path, models_dict['yolo'])
+        Config.DETECTION_CONFIDENCE = auto_detect_conf(
+            video_path,
+            models_dict['yolo'],
+            yolo_device=models_dict.get('yolo_device'),
+        )
     print(f"  DETECTION_CONFIDENCE = {Config.DETECTION_CONFIDENCE}")
 
     # Per-video --max-time conversion (each video may have different fps)

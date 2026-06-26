@@ -31,6 +31,8 @@ import os
 import pickle
 import torch.nn.functional as F
 
+from device_utils import get_cellpose_gpu_enabled, get_torch_device, get_ultralytics_device
+
 try:
     from ultralytics import YOLO
 except ImportError:
@@ -107,13 +109,12 @@ plt.rcParams['axes.linewidth']   = 1.5
 # =============================================================================
 # ─── DEVICE SELECTION ─────────────────────────────────────────────────────────
 # =============================================================================
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
-print("Using device:", device)
+device = get_torch_device()
+ultralytics_device = get_ultralytics_device(device)
+cellpose_gpu = get_cellpose_gpu_enabled(device)
+print("Using PyTorch device:", device)
+print("Using Ultralytics device:", ultralytics_device)
+print("Using Cellpose gpu=", cellpose_gpu)
 
 
 # =============================================================================
@@ -306,7 +307,7 @@ def bbox_morphology(w, h):
     return max(w, h) / min(w, h), 0.5, 0.5
 
 
-def compute_low_res_mask_morphology(crop, seg_model, conf_threshold=0.05):
+def compute_low_res_mask_morphology(crop, seg_model, conf_threshold=0.05, yolo_device=None):
     """
     Use the low-resolution YOLO-seg crop-mask method from main_low_reso.py for
     AR/ECC/Circularity. Falls back to bbox morphology if the seg model misses.
@@ -317,7 +318,13 @@ def compute_low_res_mask_morphology(crop, seg_model, conf_threshold=0.05):
         return fallback
 
     try:
-        results = seg_model.predict(source=crop, conf=conf_threshold, save=False, verbose=False)
+        results = seg_model.predict(
+            source=crop,
+            conf=conf_threshold,
+            save=False,
+            verbose=False,
+            device=yolo_device,
+        )
         if not results or results[0].masks is None or len(results[0].masks.data) == 0:
             return fallback
 
@@ -366,7 +373,7 @@ def segment_frame_downscaled_ds(original_frame, model_path, out_path,
     new_h = int(orig_h * ratio)
     resized_frame = cv2.resize(original_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-    cellpose_model = models.CellposeModel(gpu=True, pretrained_model=model_path)
+    cellpose_model = models.CellposeModel(gpu=cellpose_gpu, pretrained_model=model_path)
     masks, flows, styles = cellpose_model.eval(resized_frame, diameter=diameter, channels=[0, 0])
 
     # ----- before-edge-removal saves -----
@@ -455,7 +462,7 @@ def _reset_ultralytics_tracker(yolo_model):
         print(f"Warning: Could not reset YOLO tracker: {exc}")
 
 
-def init_low_res_backend(yolo_model_path, tracker_config_path, seg_model_path=None):
+def init_low_res_backend(yolo_model_path, tracker_config_path, seg_model_path=None, device=None):
     """Create per-video low-resolution backend state."""
     if YOLO is None:
         raise ImportError("ultralytics is required for --tracking_backend low_res.")
@@ -463,6 +470,9 @@ def init_low_res_backend(yolo_model_path, tracker_config_path, seg_model_path=No
         raise FileNotFoundError(f"Low-res YOLO model not found: {yolo_model_path}")
     if not os.path.exists(tracker_config_path):
         raise FileNotFoundError(f"Low-res tracker config not found: {tracker_config_path}")
+
+    torch_device = device or globals().get('device') or get_torch_device()
+    yolo_device = get_ultralytics_device(torch_device)
 
     yolo_model = YOLO(yolo_model_path)
     _reset_ultralytics_tracker(yolo_model)
@@ -476,6 +486,7 @@ def init_low_res_backend(yolo_model_path, tracker_config_path, seg_model_path=No
     return {
         'yolo': yolo_model,
         'seg_model': seg_model,
+        'yolo_device': yolo_device,
         'tracker_config': tracker_config_path,
         'invalid_ids': set(),
         'used_ids': set(),
@@ -543,7 +554,7 @@ def filter_low_res_boxes(results, img_w, img_h, min_cell_area=None,
     return filtered, ids
 
 
-def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5):
+def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5, yolo_device=None):
     """
     Probe early frames like main_low_reso.py to select a YOLO confidence value
     based on detection density.
@@ -561,7 +572,13 @@ def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5):
         ret, frame = cap.read()
         if not ret:
             continue
-        results = yolo_model.predict(frame, conf=0.1, max_det=2000, verbose=False)[0]
+        results = yolo_model.predict(
+            frame,
+            conf=0.1,
+            max_det=2000,
+            verbose=False,
+            device=yolo_device,
+        )[0]
         if results.boxes is not None and len(results.boxes) > 0:
             confs = results.boxes.conf.cpu().numpy()
             fracs.append(float(np.mean(confs >= 0.9)))
@@ -584,15 +601,15 @@ def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5):
     return conf
 
 
-def resolve_low_res_det_conf(video_path, yolo_model, det_conf):
+def resolve_low_res_det_conf(video_path, yolo_model, det_conf, yolo_device=None):
     if isinstance(det_conf, str):
         if det_conf.lower() == 'auto':
-            return auto_detect_low_res_conf(video_path, yolo_model)
+            return auto_detect_low_res_conf(video_path, yolo_model, yolo_device=yolo_device)
         try:
             return float(det_conf)
         except ValueError:
             print(f"Warning: --low_res_det_conf '{det_conf}' invalid; using auto.")
-            return auto_detect_low_res_conf(video_path, yolo_model)
+            return auto_detect_low_res_conf(video_path, yolo_model, yolo_device=yolo_device)
     return float(det_conf)
 
 
@@ -611,6 +628,7 @@ def detect_low_res_frame(low_res_state, frame, frame_idx, det_conf=0.25, yolo_io
         max_det=2000,
         tracker=low_res_state['tracker_config'],
         verbose=False,
+        device=low_res_state.get('yolo_device'),
     )[0]
 
     boxes, ids = filter_low_res_boxes(
@@ -1499,10 +1517,16 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
             low_res_yolo_model_path,
             low_res_tracker_config_path,
             seg_model_path=low_res_seg_model_path,
+            device=device,
         )
         low_res_det_conf = resolve_low_res_det_conf(
-            video_path, low_res_state['yolo'], low_res_det_conf)
+            video_path,
+            low_res_state['yolo'],
+            low_res_det_conf,
+            yolo_device=low_res_state.get('yolo_device'),
+        )
         print(f"  Low-res detection confidence: {low_res_det_conf}")
+        print(f"  Low-res YOLO device: {low_res_state.get('yolo_device')}")
         print('- Initializing low-resolution YOLO/BoT-SORT backend......Done~')
     print('- Initialization......Done~')
 
@@ -1543,7 +1567,10 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
             continue
         if use_low_res:
             ar_val, ecc_val, circ_val = compute_low_res_mask_morphology(
-                cell_crop, low_res_state['seg_model'])
+                cell_crop,
+                low_res_state['seg_model'],
+                yolo_device=low_res_state.get('yolo_device'),
+            )
         else:
             mask     = (masks_seg_f0 == cid).astype(np.uint8)
             ar_val   = aspect_ratio(mask)
@@ -1699,7 +1726,10 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
             # ── Morphology: compute AR/ECC/Circularity from current masks ──
             if use_low_res:
                 ar_val, ecc_val, circ_val = compute_low_res_mask_morphology(
-                    cell_crop, low_res_state['seg_model'])
+                    cell_crop,
+                    low_res_state['seg_model'],
+                    yolo_device=low_res_state.get('yolo_device'),
+                )
             else:
                 ar_val = ecc_val = circ_val = 0.0
                 for mask_cid in unique_ids:

@@ -23,6 +23,7 @@ print("DEBUG: IMPORT - 4")
 from collections import Counter
 from skimage.measure import label, regionprops
 import argparse
+from device_utils import get_cellpose_gpu_enabled, get_torch_device, get_ultralytics_device
 from low_res_backend import (
     DEFAULT_LOW_RES_SEG_MODEL,
     DEFAULT_LOW_RES_TRACKER_CONFIG,
@@ -97,13 +98,12 @@ plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['axes.linewidth'] = 1.5
 
 # ============ Device ==============
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-elif torch.cuda.is_available():
-    device = torch.device("cuda")
-else:
-    device = torch.device("cpu")
-print("Using device:", device)
+device = get_torch_device()
+ultralytics_device = get_ultralytics_device(device)
+cellpose_gpu = get_cellpose_gpu_enabled(device)
+print("Using PyTorch device:", device)
+print("Using Ultralytics device:", ultralytics_device)
+print("Using Cellpose gpu=", cellpose_gpu)
 
 
 # ============ Model Definitions ==============
@@ -306,7 +306,7 @@ def segment_frame_downscaled_ds(original_frame, model_path, out_path, ratio=0.2,
     new_h = int(orig_h * ratio)
     resized_frame = cv2.resize(original_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-    cellpose_model = models.CellposeModel(gpu=True, pretrained_model=model_path)
+    cellpose_model = models.CellposeModel(gpu=cellpose_gpu, pretrained_model=model_path)
     masks, flows, styles = cellpose_model.eval(resized_frame, diameter=diameter, channels=[0, 0])
 
     if save_mask:
@@ -1423,9 +1423,14 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
             low_res_yolo_model_path,
             low_res_tracker_config_path,
             low_res_seg_model_path,
+            device=device,
         )
         low_res_det_conf_value = resolve_low_res_det_conf(
-            video_path, low_res_state['yolo'], low_res_det_conf)
+            video_path,
+            low_res_state['yolo'],
+            low_res_det_conf,
+            yolo_device=low_res_state.get('yolo_device'),
+        )
         detections_f0 = detect_low_res_frame(
             low_res_state, first_frame, 0,
             det_conf=low_res_det_conf_value,
@@ -1441,7 +1446,10 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
         }
         morph_f0 = {
             det['track_id']: compute_low_res_mask_morphology(
-                det['crop'], low_res_state['seg_model'])
+                det['crop'],
+                low_res_state['seg_model'],
+                yolo_device=low_res_state.get('yolo_device'),
+            )
             for det in detections_f0
         }
         unique_ids_f0 = list(bboxes_f0.keys())
@@ -1573,7 +1581,10 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
             )
             morph_by_id = {
                 det['track_id']: compute_low_res_mask_morphology(
-                    det['crop'], low_res_state['seg_model'])
+                    det['crop'],
+                    low_res_state['seg_model'],
+                    yolo_device=low_res_state.get('yolo_device'),
+                )
                 for det in detections
             }
             matched = {

@@ -5,6 +5,8 @@ import numpy as np
 import torch
 from skimage.measure import label, regionprops
 
+from device_utils import get_torch_device, get_ultralytics_device
+
 try:
     from ultralytics import YOLO
 except ImportError:
@@ -49,14 +51,20 @@ def _circularity(mask):
     return min((4 * np.pi * area) / (perimeter ** 2), 1.0)
 
 
-def compute_low_res_mask_morphology(crop, seg_model, conf_threshold=0.05):
+def compute_low_res_mask_morphology(crop, seg_model, conf_threshold=0.05, yolo_device=None):
     h, w = crop.shape[:2]
     fallback = bbox_morphology(w, h)
     if seg_model is None or crop.size == 0:
         return fallback
 
     try:
-        results = seg_model.predict(source=crop, conf=conf_threshold, save=False, verbose=False)
+        results = seg_model.predict(
+            source=crop,
+            conf=conf_threshold,
+            save=False,
+            verbose=False,
+            device=yolo_device,
+        )
         if not results or results[0].masks is None or len(results[0].masks.data) == 0:
             return fallback
 
@@ -105,13 +113,16 @@ def _reset_ultralytics_tracker(yolo_model):
         print(f"Warning: Could not reset YOLO tracker: {exc}")
 
 
-def init_low_res_backend(yolo_model_path, tracker_config_path, seg_model_path=None):
+def init_low_res_backend(yolo_model_path, tracker_config_path, seg_model_path=None, device=None):
     if YOLO is None:
         raise ImportError("ultralytics is required for --tracking_backend low_res.")
     if not os.path.exists(yolo_model_path):
         raise FileNotFoundError(f"Low-res YOLO model not found: {yolo_model_path}")
     if not os.path.exists(tracker_config_path):
         raise FileNotFoundError(f"Low-res tracker config not found: {tracker_config_path}")
+
+    torch_device = device or get_torch_device()
+    yolo_device = get_ultralytics_device(torch_device)
 
     yolo_model = YOLO(yolo_model_path)
     _reset_ultralytics_tracker(yolo_model)
@@ -125,6 +136,7 @@ def init_low_res_backend(yolo_model_path, tracker_config_path, seg_model_path=No
     return {
         'yolo': yolo_model,
         'seg_model': seg_model,
+        'yolo_device': yolo_device,
         'tracker_config': tracker_config_path,
         'invalid_ids': set(),
         'used_ids': set(),
@@ -188,7 +200,7 @@ def filter_low_res_boxes(results, img_w, img_h, min_cell_area=None,
     return filtered, ids
 
 
-def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5):
+def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5, yolo_device=None):
     cap = cv2.VideoCapture(video_path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total <= 1:
@@ -202,7 +214,13 @@ def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5):
         ret, frame = cap.read()
         if not ret:
             continue
-        results = yolo_model.predict(frame, conf=0.1, max_det=2000, verbose=False)[0]
+        results = yolo_model.predict(
+            frame,
+            conf=0.1,
+            max_det=2000,
+            verbose=False,
+            device=yolo_device,
+        )[0]
         if results.boxes is not None and len(results.boxes) > 0:
             confs = results.boxes.conf.cpu().numpy()
             fracs.append(float(np.mean(confs >= 0.9)))
@@ -225,15 +243,15 @@ def auto_detect_low_res_conf(video_path, yolo_model, n_frames=5):
     return conf
 
 
-def resolve_low_res_det_conf(video_path, yolo_model, det_conf):
+def resolve_low_res_det_conf(video_path, yolo_model, det_conf, yolo_device=None):
     if isinstance(det_conf, str):
         if det_conf.lower() == 'auto':
-            return auto_detect_low_res_conf(video_path, yolo_model)
+            return auto_detect_low_res_conf(video_path, yolo_model, yolo_device=yolo_device)
         try:
             return float(det_conf)
         except ValueError:
             print(f"Warning: --low_res_det_conf '{det_conf}' invalid; using auto.")
-            return auto_detect_low_res_conf(video_path, yolo_model)
+            return auto_detect_low_res_conf(video_path, yolo_model, yolo_device=yolo_device)
     return float(det_conf)
 
 
@@ -251,6 +269,7 @@ def detect_low_res_frame(low_res_state, frame, frame_idx, det_conf=0.25, yolo_io
         max_det=2000,
         tracker=low_res_state['tracker_config'],
         verbose=False,
+        device=low_res_state.get('yolo_device'),
     )[0]
 
     boxes, ids = filter_low_res_boxes(
