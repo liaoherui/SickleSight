@@ -96,6 +96,25 @@ The standard SickleSight backend uses the `.pth/.pt` and `cyto3_train0327` files
 
 ---
 
+## Test Videos
+
+Optional sample videos are available for a quick end-to-end check:
+
+> **[Download test_video.zip](https://www.dropbox.com/scl/fi/pa5mj69c08vqpy8p0l2ic/test_video.zip?rlkey=saw6x2rihwh7f85p64fgll3qr&st=y4xefc8o&dl=0)**
+
+The archive contains two `.mp4` files: one high-resolution video for the Cellpose workflow and one low-resolution video for the YOLO/BoT-SORT workflow. After unzipping, you can test from the GUI by adding the video file, choosing `sicklesight_merged.py`, selecting the matching backend, setting **Max seconds** to a short value such as `10`, then clicking **Check** and **Run**.
+
+Command-line smoke test examples:
+
+```bash
+python sicklesight_merged.py -i path/to/high_resolution_video.mp4 -o outputs/test_high_res --max_time 10 --tracking_backend cellpose
+python sicklesight_merged.py -i path/to/low_resolution_video.mp4 -o outputs/test_low_res --max_time 10 --tracking_backend low_res
+```
+
+Each run should create a per-video output folder containing files such as `frame_0_segmentation.png`, CSV reports, plots, and an annotated video.
+
+---
+
 ## Usage
 
 ### Option A — Graphical User Interface (GUI)
