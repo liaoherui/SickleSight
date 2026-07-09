@@ -55,6 +55,27 @@ SNAME = {0: 'Sickle', 1: "Non-sickle"}
 LABEL_SICKLE = 0  # Sickle (changed from frame 0)
 LABEL_NONSICKLE = 1  # Non-sickle (unchanged from frame 0)
 
+# Note: OpenCV uses BGR color order.
+BLUE = (255, 0, 0)
+
+
+def save_segmentation_overlay(frame, bboxes, output_path):
+    overlay = frame.copy()
+    height, width = overlay.shape[:2]
+    count = 0
+    for bbox in bboxes.values():
+        x, y, w, h = [int(v) for v in bbox]
+        x1 = max(0, min(x, width - 1))
+        y1 = max(0, min(y, height - 1))
+        x2 = max(0, min(x + w, width - 1))
+        y2 = max(0, min(y + h, height - 1))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), BLUE, 2)
+        count += 1
+    cv2.imwrite(output_path, overlay)
+    print(f"  Saved frame-0 segmentation overlay: {os.path.basename(output_path)} ({count} boxes)")
+
 # 【新增】定义密集采样的步长
 DENSE_TREND_STEP = 2
 
@@ -1459,6 +1480,8 @@ def process_video_multiframe(video_path, out_path, transform, target_frames,
             first_frame_rgb, cellpose_model_path, out_path,
             save_mask=(0 in save_image_frames), frame_idx=0
         )
+
+    save_segmentation_overlay(first_frame, bboxes_f0, out_path + "/frame_0_segmentation.png")
 
     frame0_records = []
 

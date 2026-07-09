@@ -106,6 +106,24 @@ sns.set_theme(style="ticks", font_scale=1.2)
 plt.rcParams['font.family']      = 'sans-serif'
 plt.rcParams['axes.linewidth']   = 1.5
 
+
+def save_segmentation_overlay(frame, bboxes, output_path):
+    overlay = frame.copy()
+    height, width = overlay.shape[:2]
+    count = 0
+    for bbox in bboxes.values():
+        x, y, w, h = [int(v) for v in bbox]
+        x1 = max(0, min(x, width - 1))
+        y1 = max(0, min(y, height - 1))
+        x2 = max(0, min(x + w, width - 1))
+        y2 = max(0, min(y + h, height - 1))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), BLUE, 2)
+        count += 1
+    cv2.imwrite(output_path, overlay)
+    print(f"  Saved frame-0 segmentation overlay: {os.path.basename(output_path)} ({count} boxes)")
+
 # =============================================================================
 # ─── DEVICE SELECTION ─────────────────────────────────────────────────────────
 # =============================================================================
@@ -1553,6 +1571,8 @@ def process_video_combined(video_path, out_path, video_id, output_video_path,
         bboxes_f0, masks_seg_f0, unique_ids_f0, _ = segment_frame_downscaled_ds(
             first_frame, cellpose_model_path, out_path,
             is_frame_0=True, save_mask=(0 in save_image_frames), frame_idx=0)
+
+    save_segmentation_overlay(first_frame, bboxes_f0, out_path + "/frame_0_segmentation.png")
 
     cell_info     = {}
     morph_records = []   # morphology rows — Sickle_Label added AFTER FP removal

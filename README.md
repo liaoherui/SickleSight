@@ -109,15 +109,17 @@ python sicklesight_gui.py
 
 **Workflow inside the GUI:**
 
-1. Click **Add Parent Folder** — the GUI recursively scans for `.mp4` video files and displays them in a file tree.
+1. Click **Add Folder** to recursively scan for `.mp4` videos, or **Add Video** to add individual files.
 2. Select specific videos or entire folders from the tree.
 3. Choose a **Pipeline script**. The GUI defaults to the folder containing `sicklesight_gui.py` and selects `sicklesight_merged.py` when available.
 4. Choose **Segmentation / Tracking**:
    - `Cellpose` for standard-resolution videos
    - `Low-resolution YOLO/BoT-SORT` for low-resolution videos
-5. Set **Max seconds**. Leave **Frames/sec** blank to use the video's own FPS, or enter a number to override it.
+5. Set **Max seconds**, **Frames/sec**, **Full video**, **Target frames**, and **YOLO conf** as needed. Leave `Frames/sec` blank and `YOLO conf` as `auto` unless you want to override them.
 6. Confirm the **Output Folder**. The default is `output_default/` beside the GUI script.
-7. Click **Generate Script & Run Analysis**.
+7. Click **Check** to run preflight checks, then click **Run** when the setup is ready.
+
+The GUI also includes an inline video preview, a save-current-frame control, and a results preview panel for key output figures.
 
 ---
 
@@ -234,7 +236,7 @@ python sicklesight_merged.py \
     --full_video
 ```
 
-**Output files:** all files from Pipeline 1 and Pipeline 2 combined.
+**Output files:** all files from Pipeline 1 and Pipeline 2 combined. Each per-video output folder also includes `frame_0_segmentation.png`, a frame-0 image with blue segmentation/detection bounding boxes.
 
 ---
 
@@ -316,6 +318,8 @@ python sicklesight_part1.py \
 
 | File | Description |
 |---|---|
+| `first_frame.png` | Raw frame-0 image used as the analysis baseline |
+| `frame_0_segmentation.png` | Frame-0 image with blue segmentation/detection bounding boxes |
 | `<video_name>.avi` | Annotated video with cell labels and bounding boxes |
 | `state_ratio_report.csv` | 7-class state distribution over time |
 | `state_ratio_plot.png` | 7-class ratio curves |
@@ -413,6 +417,8 @@ python sicklesight_part2.py \
 
 | File | Description |
 |---|---|
+| `frame_0.png` | Raw frame-0 image used for morphology analysis |
+| `frame_0_segmentation.png` | Frame-0 image with blue segmentation/detection bounding boxes |
 | `frame<N>_raw_data.csv` | Per-cell morphology data at frame N |
 | `frame<N>_stats_ar.csv` | Aspect ratio summary statistics at frame N |
 | `frame<N>_stats_ecc.csv` | Eccentricity summary statistics at frame N |

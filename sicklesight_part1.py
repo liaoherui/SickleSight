@@ -55,6 +55,24 @@ LABEL_UNCHANGED = 1
 LABEL_NONPOCKED = 0
 LABEL_POCKED = 1
 
+
+def save_segmentation_overlay(frame, bboxes, output_path):
+    overlay = frame.copy()
+    height, width = overlay.shape[:2]
+    count = 0
+    for bbox in bboxes.values():
+        x, y, w, h = [int(v) for v in bbox]
+        x1 = max(0, min(x, width - 1))
+        y1 = max(0, min(y, height - 1))
+        x2 = max(0, min(x + w, width - 1))
+        y2 = max(0, min(y + h, height - 1))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), BLUE, 2)
+        count += 1
+    cv2.imwrite(output_path, overlay)
+    print(f"  Saved frame-0 segmentation overlay: {os.path.basename(output_path)} ({count} boxes)")
+
 # Note (kaiyu) Maps from class index to class name
 DNAME = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G'}
 PNAME = {0: 'Non-pocked', 1: "Pocked"}
@@ -845,6 +863,8 @@ def process_video(video_path, out_path, video_id, output_video_path, seven_class
         DEBUG_PRINT("Run segment_frame_downscaled_ds w/ cellpose_model")
         bboxes, masks_seg, unique_ids, resized_frame = segment_frame_downscaled_ds(first_frame, cellpose_model_path,
                                                                                    out_path, is_frame_0=True)
+
+    save_segmentation_overlay(first_frame, bboxes, out_path + "/frame_0_segmentation.png")
 
     # Note (kaiyu): cell_info is a SUPER IMPORTANT data structure; it holds all relevant
     # information output by the models to produce results
