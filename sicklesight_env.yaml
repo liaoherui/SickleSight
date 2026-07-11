@@ -86,4 +86,4 @@ dependencies:
       - tifffile
       - torch
       - torchvision
-      - ultralytics
+      - ultralytics==8.4.6
