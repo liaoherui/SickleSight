@@ -61,7 +61,7 @@ cd sicklesight
 
 ```bash
 conda env create -f sicklesight_env.yaml
-conda activate sicklesight
+conda activate SickleSight
 ```
 
 The environment includes `ultralytics`, which is required for the low-resolution YOLO/BoT-SORT backend.
