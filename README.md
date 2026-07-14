@@ -76,18 +76,51 @@ After creating and activating the Conda environment, check what PyTorch sees:
 python -c "import torch; print('torch:', torch.__version__); print('torch CUDA build:', torch.version.cuda); print('cuda available:', torch.cuda.is_available()); print('gpu:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'not detected')"
 ```
 
-For RTX 50-series / Blackwell GPUs such as the RTX 5090, use a CUDA 12.8 or newer PyTorch build. Older CUDA wheels can detect the GPU but still fail at runtime with `CUDA error: no kernel image is available for execution on the device`.
+Choose the PyTorch install command that matches your Windows GPU:
 
-Install or replace PyTorch inside the same environment:
+<details>
+<summary><strong>Option A — RTX 50-series / Blackwell, e.g. RTX 5090, 5080, 5070</strong></summary>
+
+RTX 50-series GPUs use compute capability 12.0. Use a CUDA 12.8 or newer PyTorch build. Older CUDA wheels can detect the GPU but still fail at runtime with `CUDA error: no kernel image is available for execution on the device`.
 
 ```powershell
 python -m pip uninstall -y torch torchvision torchaudio
 python -m pip install --upgrade --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
-If the install fails or CUDA still fails the checks below, update the NVIDIA driver and choose the newest Windows / Pip / CUDA option from the official PyTorch install selector: <https://pytorch.org/get-started/locally/>.
+If CUDA still fails, update the NVIDIA driver and choose the newest Windows / Pip / CUDA option from the official PyTorch install selector: <https://pytorch.org/get-started/locally/>.
 
-Verify again with the one-line check above. Then run a tiny CUDA convolution smoke test:
+</details>
+
+<details>
+<summary><strong>Option B — RTX 40/30/20 series, GTX 16 series, or other non-RTX-50 NVIDIA GPUs</strong></summary>
+
+These GPUs usually work with the regular CUDA wheels from the PyTorch install selector. CUDA 12.6 is a conservative choice for many non-RTX-50 Windows laptops; CUDA 12.8 is also fine if your NVIDIA driver is new enough.
+
+```powershell
+python -m pip uninstall -y torch torchvision torchaudio
+python -m pip install --upgrade --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu126
+```
+
+If `cu126` fails or your driver is very new, choose the current Windows / Pip / CUDA command from the official PyTorch install selector: <https://pytorch.org/get-started/locally/>.
+
+</details>
+
+<details>
+<summary><strong>Option C — No NVIDIA GPU, or CPU-only fallback</strong></summary>
+
+Use this only when the machine has no CUDA-capable NVIDIA GPU, or when you intentionally want CPU execution.
+
+```powershell
+python -m pip uninstall -y torch torchvision torchaudio
+python -m pip install --upgrade --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cpu
+```
+
+CPU mode is supported but significantly slower.
+
+</details>
+
+After installing the selected PyTorch build, verify again with the one-line check above. Then run a tiny CUDA convolution smoke test for any NVIDIA GPU setup:
 
 ```powershell
 python -c "import torch; print('torch:', torch.__version__, 'cuda build:', torch.version.cuda); print('gpu:', torch.cuda.get_device_name(0)); print('capability:', torch.cuda.get_device_capability(0)); print('arch list:', torch.cuda.get_arch_list()); x=torch.randn(1,3,32,32,device='cuda'); m=torch.nn.Conv2d(3,8,3).cuda(); y=m(x); torch.cuda.synchronize(); print('CUDA conv smoke test: OK', y.shape)"
