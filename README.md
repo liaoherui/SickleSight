@@ -61,10 +61,31 @@ cd sicklesight
 
 ```bash
 conda env create -f sicklesight_env.yaml
-conda activate SickleSight
+conda activate sicklesight
 ```
 
 The environment includes `ultralytics`, which is required for the low-resolution YOLO/BoT-SORT backend.
+
+#### Windows NVIDIA GPU / CUDA setup
+
+On Windows, having an NVIDIA GPU is not enough by itself: PyTorch must be installed as a CUDA-enabled build. If SickleSight prints `Using PyTorch device: cpu` on a GPU laptop, the most common cause is that the environment contains a CPU-only PyTorch build, or the NVIDIA driver is too old for the installed CUDA wheel.
+
+After creating and activating the Conda environment, check what PyTorch sees:
+
+```powershell
+python -c "import torch; print('torch:', torch.__version__); print('torch CUDA build:', torch.version.cuda); print('cuda available:', torch.cuda.is_available()); print('gpu:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'not detected')"
+```
+
+If `cuda available` is `False`, install a CUDA-enabled PyTorch build inside the same environment. For example:
+
+```powershell
+python -m pip uninstall -y torch torchvision torchaudio
+python -m pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu126
+```
+
+If your NVIDIA driver is current and supports CUDA 12.8, you can use the `cu128` PyTorch index instead. If the driver is older, update the NVIDIA driver or choose an older CUDA wheel from the official PyTorch install selector: <https://pytorch.org/get-started/locally/>.
+
+Verify again with the one-line check above. SickleSight will use CUDA when `torch.cuda.is_available()` reports `True`; otherwise it falls back to CPU.
 
 ### 3. Download pre-trained models
 

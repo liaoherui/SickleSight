@@ -2952,16 +2952,31 @@ import sys
 
 modules = {required_modules!r}
 missing = [name for name in modules if importlib.util.find_spec(name) is None]
-payload = {{"python": sys.version.split()[0], "missing": missing, "cellpose": None, "device": "cpu"}}
+payload = {{
+    "python": sys.version.split()[0],
+    "missing": missing,
+    "cellpose": None,
+    "device": "cpu",
+    "torch": None,
+    "torch_cuda": None,
+    "cuda_available": False,
+    "cuda_device_count": 0,
+    "cuda_device_name": None,
+}}
 if importlib.util.find_spec("cellpose") is not None:
     import cellpose
     payload["cellpose"] = getattr(cellpose, "__version__", "unknown")
 if importlib.util.find_spec("torch") is not None:
     import torch
-    if torch.backends.mps.is_available():
-        payload["device"] = "mps"
-    elif torch.cuda.is_available():
+    payload["torch"] = getattr(torch, "__version__", "unknown")
+    payload["torch_cuda"] = getattr(torch.version, "cuda", None)
+    payload["cuda_available"] = bool(torch.cuda.is_available())
+    if payload["cuda_available"]:
         payload["device"] = "cuda"
+        payload["cuda_device_count"] = torch.cuda.device_count()
+        payload["cuda_device_name"] = torch.cuda.get_device_name(0)
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        payload["device"] = "mps"
 print(json.dumps(payload))
 """
 
@@ -3019,6 +3034,40 @@ print(json.dumps(payload))
                     "detail": f"Python {payload['python']} with required modules available: {', '.join(required_modules)}.",
                 }
             )
+
+        torch_version = payload.get("torch")
+        if torch_version:
+            if payload["device"] == "cuda":
+                checks.append(
+                    {
+                        "status": "OK",
+                        "item": "Accelerator",
+                        "detail": (
+                            f"CUDA is available. PyTorch {torch_version}, CUDA build {payload.get('torch_cuda')}, "
+                            f"GPU: {payload.get('cuda_device_name')}."
+                        ),
+                    }
+                )
+            elif payload["device"] == "mps":
+                checks.append(
+                    {
+                        "status": "OK",
+                        "item": "Accelerator",
+                        "detail": f"Apple MPS is available. PyTorch {torch_version}.",
+                    }
+                )
+            else:
+                cuda_build = payload.get("torch_cuda") or "none"
+                checks.append(
+                    {
+                        "status": "WARN",
+                        "item": "Accelerator",
+                        "detail": (
+                            f"PyTorch {torch_version} reports torch.cuda.is_available()=False "
+                            f"(CUDA build: {cuda_build}); SickleSight will run on CPU."
+                        ),
+                    }
+                )
 
         cellpose_version = payload.get("cellpose")
         if cellpose_version:
