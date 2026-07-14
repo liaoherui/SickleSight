@@ -76,16 +76,24 @@ After creating and activating the Conda environment, check what PyTorch sees:
 python -c "import torch; print('torch:', torch.__version__); print('torch CUDA build:', torch.version.cuda); print('cuda available:', torch.cuda.is_available()); print('gpu:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'not detected')"
 ```
 
-If `cuda available` is `False`, install a CUDA-enabled PyTorch build inside the same environment. For example:
+For RTX 50-series / Blackwell GPUs such as the RTX 5090, use a CUDA 12.8 or newer PyTorch build. Older CUDA wheels can detect the GPU but still fail at runtime with `CUDA error: no kernel image is available for execution on the device`.
+
+Install or replace PyTorch inside the same environment:
 
 ```powershell
 python -m pip uninstall -y torch torchvision torchaudio
-python -m pip install --upgrade torch torchvision --index-url https://download.pytorch.org/whl/cu126
+python -m pip install --upgrade --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu128
 ```
 
-If your NVIDIA driver is current and supports CUDA 12.8, you can use the `cu128` PyTorch index instead. If the driver is older, update the NVIDIA driver or choose an older CUDA wheel from the official PyTorch install selector: <https://pytorch.org/get-started/locally/>.
+If the install fails or CUDA still fails the checks below, update the NVIDIA driver and choose the newest Windows / Pip / CUDA option from the official PyTorch install selector: <https://pytorch.org/get-started/locally/>.
 
-Verify again with the one-line check above. SickleSight will use CUDA when `torch.cuda.is_available()` reports `True`; otherwise it falls back to CPU.
+Verify again with the one-line check above. Then run a tiny CUDA convolution smoke test:
+
+```powershell
+python -c "import torch; print('torch:', torch.__version__, 'cuda build:', torch.version.cuda); print('gpu:', torch.cuda.get_device_name(0)); print('capability:', torch.cuda.get_device_capability(0)); print('arch list:', torch.cuda.get_arch_list()); x=torch.randn(1,3,32,32,device='cuda'); m=torch.nn.Conv2d(3,8,3).cuda(); y=m(x); torch.cuda.synchronize(); print('CUDA conv smoke test: OK', y.shape)"
+```
+
+SickleSight will use CUDA when this smoke test passes. If `torch.cuda.is_available()` is `True` but the smoke test reports `no kernel image is available`, the installed PyTorch wheel is too old for the GPU architecture; install a newer CUDA wheel such as `cu128` or newer.
 
 ### 3. Download pre-trained models
 

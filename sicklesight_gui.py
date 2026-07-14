@@ -2962,6 +2962,12 @@ payload = {{
     "cuda_available": False,
     "cuda_device_count": 0,
     "cuda_device_name": None,
+    "cuda_capability": None,
+    "cuda_sm": None,
+    "cuda_arch_list": [],
+    "cuda_sm_supported": None,
+    "cuda_smoke_ok": None,
+    "cuda_smoke_error": None,
 }}
 if importlib.util.find_spec("cellpose") is not None:
     import cellpose
@@ -2975,6 +2981,27 @@ if importlib.util.find_spec("torch") is not None:
         payload["device"] = "cuda"
         payload["cuda_device_count"] = torch.cuda.device_count()
         payload["cuda_device_name"] = torch.cuda.get_device_name(0)
+        try:
+            capability = torch.cuda.get_device_capability(0)
+            payload["cuda_capability"] = list(capability)
+            payload["cuda_sm"] = f"sm_{{capability[0]}}{{capability[1]}}"
+        except Exception as exc:
+            payload["cuda_smoke_error"] = f"Could not read CUDA capability: {{type(exc).__name__}}: {{exc}}"
+        try:
+            payload["cuda_arch_list"] = list(torch.cuda.get_arch_list())
+        except Exception:
+            payload["cuda_arch_list"] = []
+        if payload["cuda_sm"] is not None:
+            payload["cuda_sm_supported"] = payload["cuda_sm"] in payload["cuda_arch_list"]
+        try:
+            x = torch.randn(1, 3, 32, 32, device="cuda")
+            model = torch.nn.Conv2d(3, 8, 3).cuda()
+            y = model(x)
+            torch.cuda.synchronize()
+            payload["cuda_smoke_ok"] = True
+        except Exception as exc:
+            payload["cuda_smoke_ok"] = False
+            payload["cuda_smoke_error"] = f"{{type(exc).__name__}}: {{str(exc).splitlines()[0]}}"
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         payload["device"] = "mps"
 print(json.dumps(payload))
@@ -3038,16 +3065,40 @@ print(json.dumps(payload))
         torch_version = payload.get("torch")
         if torch_version:
             if payload["device"] == "cuda":
-                checks.append(
-                    {
-                        "status": "OK",
-                        "item": "Accelerator",
-                        "detail": (
-                            f"CUDA is available. PyTorch {torch_version}, CUDA build {payload.get('torch_cuda')}, "
-                            f"GPU: {payload.get('cuda_device_name')}."
-                        ),
-                    }
-                )
+                capability = payload.get("cuda_capability")
+                if isinstance(capability, list) and len(capability) >= 2:
+                    capability_text = f"{capability[0]}.{capability[1]}"
+                else:
+                    capability_text = "unknown"
+                sm_text = payload.get("cuda_sm") or "unknown"
+                if payload.get("cuda_smoke_ok") is False:
+                    checks.append(
+                        {
+                            "status": "FAIL",
+                            "item": "Accelerator",
+                            "detail": (
+                                f"CUDA is detected, but a test Conv2d failed on {payload.get('cuda_device_name')} "
+                                f"(compute capability {capability_text}, {sm_text}; PyTorch CUDA build "
+                                f"{payload.get('torch_cuda')}): {payload.get('cuda_smoke_error')}. "
+                                "For RTX 50-series GPUs, install a CUDA 12.8 or newer PyTorch wheel."
+                            ),
+                        }
+                    )
+                else:
+                    arch_note = ""
+                    if payload.get("cuda_sm_supported") is False:
+                        arch_note = f" Build arch list does not include {sm_text}; install a newer PyTorch CUDA wheel if CUDA kernels fail."
+                    checks.append(
+                        {
+                            "status": "OK",
+                            "item": "Accelerator",
+                            "detail": (
+                                f"CUDA is available and a test Conv2d passed. PyTorch {torch_version}, "
+                                f"CUDA build {payload.get('torch_cuda')}, GPU: {payload.get('cuda_device_name')}, "
+                                f"compute capability {capability_text} ({sm_text}).{arch_note}"
+                            ),
+                        }
+                    )
             elif payload["device"] == "mps":
                 checks.append(
                     {
