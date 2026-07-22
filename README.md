@@ -130,6 +130,8 @@ SickleSight will use CUDA when this smoke test passes. If `torch.cuda.is_availab
 
 ### 3. Download pre-trained models
 
+<b>-- Update --</b>: You can also download both pre-trained models and test videos via **[figshare](https://doi.org/10.6084/m9.figshare.33058646)**
+
 Model files are too large to store directly in GitHub. Download **CellBox-Models.zip** from Dropbox, then unzip it into the repository root:
 
 > **[Download CellBox-Models.zip](https://www.dropbox.com/scl/fi/0a4seofjgniqbq4i6x0f3/CellBox-Models.zip?rlkey=6cwzmzxrzs86t19az6eioi89q&st=xail4oqy&dl=0)**
