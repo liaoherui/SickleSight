@@ -132,7 +132,7 @@ SickleSight will use CUDA when this smoke test passes. If `torch.cuda.is_availab
 ### 3. Download pre-trained models and test videos
 
 > [!IMPORTANT]
-> **Recommended download:** pre-trained models and sample test videos are available together on figshare: **[Download SickleSight models and test videos](https://doi.org/10.6084/m9.figshare.33058646)**.
+> **Recommended download:** pre-trained models and sample test videos are available together on **figshare**: **[Download SickleSight models and test videos](https://doi.org/10.6084/m9.figshare.33058646)**.
 
 #### Pre-trained model download
 
