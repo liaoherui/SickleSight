@@ -32,6 +32,7 @@ SickleSight/
 ├── sicklesight_env.yaml      # Conda environment specification
 ├── index.html                # Browser-based image labeling tool
 ├── tool.py                   # Post-processing statistical analysis & visualization GUI
+├── Sicklesight_runtest.mp4   # GUI walkthrough video for setup and test runs
 └── README.md
 ```
 
@@ -176,6 +177,20 @@ python sicklesight_merged.py -i path/to/low_resolution_video.mp4 -o outputs/test
 ```
 
 Each run should create a per-video output folder containing files such as `frame_0_segmentation.png`, CSV reports, plots, and an annotated video.
+
+---
+
+## GUI Walkthrough Video
+
+For a visual step-by-step example, watch the included GUI walkthrough video:
+
+> **[Click to play the SickleSight GUI walkthrough video](Sicklesight_runtest.mp4)**
+
+The video demonstrates the recommended first-run workflow: downloading the pre-trained model package and sample test videos, launching `sicklesight_gui.py`, adding a test video, selecting the combined pipeline, choosing the appropriate tracking backend, running **Check**, and starting a short test run.
+
+<video src="Sicklesight_runtest.mp4" controls width="100%">
+  Your browser does not support embedded videos. Open Sicklesight_runtest.mp4 instead.
+</video>
 
 ---
 
