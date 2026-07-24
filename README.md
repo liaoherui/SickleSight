@@ -134,7 +134,7 @@ SickleSight will use CUDA when this smoke test passes. If `torch.cuda.is_availab
 > [!IMPORTANT]
 > **Recommended download:** pre-trained models and sample test videos are available together on **figshare**: **[Download SickleSight models and test videos](https://doi.org/10.6084/m9.figshare.33058646)**.
 
-#### Pre-trained model download
+#### 3.1 Pre-trained model download
 
 Model files are too large to store directly in GitHub. The Dropbox link below is kept as a separate mirror for the model package. Download **CellBox-Models.zip**, then unzip it into the repository root:
 
@@ -162,7 +162,7 @@ SickleSight/
 
 The standard SickleSight backend uses the `.pth/.pt` and `cyto3_train0327` files. The low-resolution backend uses `yolo/`, `seg/`, and `configs/botsort_cell.yaml`.
 
-#### Test videos
+#### 3.2 Test videos download
 
 Optional sample videos are available for a quick end-to-end check. They are included in the recommended figshare download above, or can be downloaded separately from the Dropbox mirror below:
 
