@@ -129,11 +129,12 @@ python -c "import torch; print('torch:', torch.__version__, 'cuda build:', torch
 
 SickleSight will use CUDA when this smoke test passes. If `torch.cuda.is_available()` is `True` but the smoke test reports `no kernel image is available`, the installed PyTorch wheel is too old for the GPU architecture; install a newer CUDA wheel such as `cu128` or newer.
 
-### 3. Download pre-trained models
+### 3. Download pre-trained models and test videos
 
-<b>-- Update --</b>: You can also download both pre-trained models and test videos via **[figshare](https://doi.org/10.6084/m9.figshare.33058646)**
+> [!IMPORTANT]
+> **Recommended download:** pre-trained models and sample test videos are available together on figshare: **[Download SickleSight models and test videos](https://doi.org/10.6084/m9.figshare.33058646)**.
 
-Model files are too large to store directly in GitHub. Download **CellBox-Models.zip** from Dropbox, then unzip it into the repository root:
+Model files are too large to store directly in GitHub. The Dropbox link below is kept as a separate mirror for the model package. Download **CellBox-Models.zip**, then unzip it into the repository root:
 
 > **[Download CellBox-Models.zip](https://www.dropbox.com/scl/fi/0a4seofjgniqbq4i6x0f3/CellBox-Models.zip?rlkey=6cwzmzxrzs86t19az6eioi89q&st=xail4oqy&dl=0)**
 
@@ -163,7 +164,7 @@ The standard SickleSight backend uses the `.pth/.pt` and `cyto3_train0327` files
 
 ## Test Videos
 
-Optional sample videos are available for a quick end-to-end check:
+Optional sample videos are available for a quick end-to-end check. They are included in the recommended figshare download above, or can be downloaded separately from the Dropbox mirror below:
 
 > **[Download test_video.zip](https://www.dropbox.com/scl/fi/pa5mj69c08vqpy8p0l2ic/test_video.zip?rlkey=saw6x2rihwh7f85p64fgll3qr&st=y4xefc8o&dl=0)**
 
